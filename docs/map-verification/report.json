@@ -1,0 +1,190 @@
+{
+  "source_commit": "3e82be73000f3637c097c7bf5d543d15d28283f2",
+  "engine": "Chromium / WebGL",
+  "passed": true,
+  "checks": [
+    {
+      "name": "webgl2",
+      "passed": true,
+      "details": {
+        "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+        "renderer": "WebKit WebGL"
+      }
+    },
+    {
+      "name": "china-overview-rendered",
+      "passed": true,
+      "details": {
+        "outline": 6,
+        "dashes": 1,
+        "regions": [
+          "中国台湾省"
+        ],
+        "country_labels": [
+          "摩纳哥",
+          "黑山",
+          "斯洛伐克",
+          "拉脱维亚",
+          "格鲁吉亚",
+          "圣马力诺",
+          "摩尔多瓦",
+          "爱沙尼亚",
+          "捷克",
+          "阿尔巴尼亚",
+          "立陶宛",
+          "塞尔维亚",
+          "斯洛文尼亚",
+          "乌克兰",
+          "瑞士",
+          "罗马尼亚",
+          "波兰",
+          "丹麦",
+          "保加利亚",
+          "瑞典",
+          "挪威",
+          "白俄罗斯",
+          "奥地利",
+          "德国",
+          "意大利",
+          "吉尔吉斯斯坦",
+          "乌兹别克斯坦",
+          "哈萨克斯坦",
+          "蒙古国",
+          "塞浦路斯",
+          "南苏丹",
+          "利比亚",
+          "希腊",
+          "中非",
+          "乌干达",
+          "突尼斯",
+          "伊拉克",
+          "厄立特里亚",
+          "喀麦隆",
+          "赤道几内亚",
+          "叙利亚",
+          "尼日尔",
+          "乍得",
+          "苏丹",
+          "以色列",
+          "埃塞俄比亚",
+          "尼日利亚",
+          "埃及",
+          "肯尼亚",
+          "土耳其",
+          "沙特阿拉伯",
+          "索马里",
+          "科威特",
+          "斯里兰卡",
+          "阿曼",
+          "塔吉克斯坦 / 塔吉克",
+          "阿拉伯联合酋长国",
+          "也门",
+          "土库曼斯坦",
+          "尼泊尔",
+          "阿富汗",
+          "印度",
+          "巴基斯坦",
+          "伊朗",
+          "文莱",
+          "不丹",
+          "泰国",
+          "柬埔寨",
+          "孟加拉国",
+          "缅甸",
+          "老挝",
+          "马来西亚",
+          "朝鲜",
+          "中国",
+          "越南",
+          "韩国",
+          "菲律宾",
+          "日本",
+          "坦桑尼亚",
+          "卢旺达",
+          "加蓬",
+          "刚果民主共和国",
+          "东帝汶",
+          "印度尼西亚"
+        ]
+      }
+    },
+    {
+      "name": "south-sea-rendered",
+      "passed": true,
+      "details": {
+        "visible_features": 3,
+        "country_labels": [
+          "柬埔寨",
+          "老挝",
+          "菲律宾"
+        ]
+      }
+    },
+    {
+      "name": "taiwan-region-rendered",
+      "passed": true,
+      "details": {
+        "regions": [
+          "中国台湾省"
+        ],
+        "country_labels": []
+      }
+    },
+    {
+      "name": "hong-kong-macao-rendered",
+      "passed": true,
+      "details": {
+        "regions": [
+          "中国澳门特别行政区",
+          "中国香港特别行政区"
+        ],
+        "country_labels": []
+      }
+    },
+    {
+      "name": "search-Taipei",
+      "passed": true,
+      "details": {
+        "text": "台北中国 · 台湾省\n新北中国 · 台湾省"
+      }
+    },
+    {
+      "name": "search-香港",
+      "passed": true,
+      "details": {
+        "text": "香港中国 · 香港特别行政区"
+      }
+    },
+    {
+      "name": "search-澳门",
+      "passed": true,
+      "details": {
+        "text": "澳门中国 · 澳门特别行政区"
+      }
+    },
+    {
+      "name": "taipei-detail",
+      "passed": true,
+      "details": {
+        "text": "✕\n臺北市\n台湾省, 中国 · 北纬25.04°，东经121.57° · 17 米\n32\n每年符合条件的天数（估计）\n约每 11 天有 1 天符合条件 · 2月、3月和1月最适宜\n常见限制：10月⁠–⁠4月日照不足和5月⁠–⁠9月偏热。\n符合条件的概率\n0%\n50%\n100%\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n日照不足\n偏热\n日照不足\n逐"
+      }
+    }
+  ],
+  "errors": [],
+  "screenshots": [
+    "china-overview.jpg",
+    "south-sea.jpg",
+    "taiwan.jpg",
+    "hong-kong-macao.jpg",
+    "search-taipei.jpg",
+    "search-hong-kong.jpg",
+    "search-macao.jpg",
+    "taipei-detail.jpg"
+  ],
+  "workflow_run_url": "https://github.com/xschen-beb/weather-atlas-zh-cn/actions/runs/38439497735",
+  "manual_screenshot_review": {
+    "completed": true,
+    "scope": "South China Sea, Taiwan, Hong Kong and Macao; overview label spacing and Chinese regional labels."
+  }
+}
+
