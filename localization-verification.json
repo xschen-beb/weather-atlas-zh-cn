@@ -1,0 +1,12 @@
+{
+  "language": "zh-CN",
+  "cities_checked": 4598,
+  "terminology_checked": true,
+  "bilingual_search_checked": true,
+  "dates_hours_and_months_checked": true,
+  "climate_panel_checked": true,
+  "monthly_table_checked": true,
+  "forecast_text_checked": true,
+  "checks": "Non-browser execution of the localized presentation logic and scientific-input comparison.",
+  "verification_limit": "No browser/WebGL rendering check was performed."
+}

@@ -1,0 +1,25 @@
+[
+  {
+    "service": "live_worker_source_map",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "service": "Open-Meteo",
+    "status": 200,
+    "cors": "*",
+    "bytes": 320,
+    "current_temperature": 20.5
+  },
+  {
+    "service": "OpenFreeMap",
+    "status": 200,
+    "cors": "*",
+    "bytes": 19254
+  },
+  {
+    "service": "Nominatim",
+    "status": 200,
+    "cors": "*",
+    "bytes": 650
+  }
+]

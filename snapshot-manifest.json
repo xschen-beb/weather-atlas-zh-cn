@@ -1,0 +1,154 @@
+{
+  "origin": "https://weather.theojaffee.net/",
+  "retrieved_at": "2026-10-13T14:29:53Z",
+  "kind": "public deployment snapshot, not original authoring source",
+  "files": [
+    {
+      "path": "assets/climate.worker-BYFoMrb0.js",
+      "url": "https://weather.theojaffee.net/assets/climate.worker-BYFoMrb0.js",
+      "bytes": 10442,
+      "sha256": "e462feb998184bda7d3bab8802f7b8754b40aeb5751ee1d4127b99cdd6bae166",
+      "content_type": "application/javascript; charset=utf-8"
+    },
+    {
+      "path": "assets/index-C66M0BGp.css",
+      "url": "https://weather.theojaffee.net/assets/index-C66M0BGp.css",
+      "bytes": 86557,
+      "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260",
+      "content_type": "text/css; charset=utf-8"
+    },
+    {
+      "path": "assets/index-Dx2OKNjk.js",
+      "url": "https://weather.theojaffee.net/assets/index-Dx2OKNjk.js",
+      "bytes": 1164758,
+      "sha256": "e2a1c556864b0d8d720a1490511c1228e1682571ce7b07e8e812c132975c81fd",
+      "content_type": "application/javascript; charset=utf-8"
+    },
+    {
+      "path": "assets/live.worker-C5u4iOje.js",
+      "url": "https://weather.theojaffee.net/assets/live.worker-C5u4iOje.js",
+      "bytes": 11668,
+      "sha256": "6c8e6efb5e931043921f0c75aafa7a4870bdcb6e7e4b2e9dd2d10e94ef7d92e4",
+      "content_type": "application/javascript; charset=utf-8"
+    },
+    {
+      "path": "data/cities.json",
+      "url": "https://weather.theojaffee.net/data/cities.json",
+      "bytes": 251536,
+      "sha256": "5b9741f0f3e72a187f4609bff9e9ee53c1c05d16dd8560cbaf9ba7859f7b0af6",
+      "content_type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "data/climate/cells.bin",
+      "url": "https://weather.theojaffee.net/data/climate/cells.bin",
+      "bytes": 44464,
+      "sha256": "9f869bacc38261fe181ba30cf1ef3206e7cc360db34b77019fed4f1b5328c0da",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/cloud.bin",
+      "url": "https://weather.theojaffee.net/data/climate/cloud.bin",
+      "bytes": 2063200,
+      "sha256": "cf61c805ec58692c47bd73a49a01ef927cc36254d2411100b548e804051f9f37",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/dew.bin",
+      "url": "https://weather.theojaffee.net/data/climate/dew.bin",
+      "bytes": 2399181,
+      "sha256": "794e86ca343ab554188bbc54b1acf6bc941c664415365cc6eb58b5d759952142",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/feels.bin",
+      "url": "https://weather.theojaffee.net/data/climate/feels.bin",
+      "bytes": 2596920,
+      "sha256": "04ea884e23f30d839767009e74b9c8f14fa26f5f30dc4b0e4fbfa657241c7242",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/meta.json",
+      "url": "https://weather.theojaffee.net/data/climate/meta.json",
+      "bytes": 3506,
+      "sha256": "be9080f5b5e9550971e35acc482b7d4bf1eaa062c5c8177578de5124dfd6dfd1",
+      "content_type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "data/climate/precip.bin",
+      "url": "https://weather.theojaffee.net/data/climate/precip.bin",
+      "bytes": 1384464,
+      "sha256": "c13153acd772f88c07ccc3805b7ff30e27b7af95df12299a54e9fabe22fac079",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/snow.bin",
+      "url": "https://weather.theojaffee.net/data/climate/snow.bin",
+      "bytes": 551807,
+      "sha256": "5dad0b30782e1413c67970bc992053d68d73720003f36d4a19fb2518f04f2b5c",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/sst.bin",
+      "url": "https://weather.theojaffee.net/data/climate/sst.bin",
+      "bytes": 867352,
+      "sha256": "3cb156fc5d4c3ef8039b6fbb458abfb8480a962c0c0127fbff2a6a6552cd8c7f",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/sun.bin",
+      "url": "https://weather.theojaffee.net/data/climate/sun.bin",
+      "bytes": 2793749,
+      "sha256": "c78def3d129ee4451facb8ddd6761854507f7835a516459a0fdac698aa1edb1e",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/tmax.bin",
+      "url": "https://weather.theojaffee.net/data/climate/tmax.bin",
+      "bytes": 2392629,
+      "sha256": "bbe574b2339893e61fbfb2f963ccc822131470eaec7a5f252f2eb59d8267b62b",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/tmin.bin",
+      "url": "https://weather.theojaffee.net/data/climate/tmin.bin",
+      "bytes": 2383334,
+      "sha256": "86da56b9cebdefd4f64a9c0a6a265dd1ba084cdb7188b3b1b2b5d8ea6fd837fd",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/uv.bin",
+      "url": "https://weather.theojaffee.net/data/climate/uv.bin",
+      "bytes": 1982572,
+      "sha256": "96ed5a40537918bf9a3b6ae0e1ce68fa3eb0c90e12af277fec4cadf1748485b4",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/climate/wind.bin",
+      "url": "https://weather.theojaffee.net/data/climate/wind.bin",
+      "bytes": 1840239,
+      "sha256": "d76b0e5152123f7ba2603c0a95a602337db2c88336bb5eb923eb4cf4bab81dfb",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "data/coastline.json",
+      "url": "https://weather.theojaffee.net/data/coastline.json",
+      "bytes": 897499,
+      "sha256": "2e1f743fab0575a71766564945aaac60bcdbf31d2fe84c5745f90340534426c1",
+      "content_type": "application/json; charset=utf-8"
+    },
+    {
+      "path": "data/dem.bin",
+      "url": "https://weather.theojaffee.net/data/dem.bin",
+      "bytes": 1327938,
+      "sha256": "8d1ca4fd7de497f1a65837ee45c711bd758945b641991e718894052264135285",
+      "content_type": "application/octet-stream"
+    },
+    {
+      "path": "index.html",
+      "url": "https://weather.theojaffee.net/",
+      "bytes": 2370,
+      "sha256": "1eeab4b3e924cedfc8edaed56a95a4bb97d1444904462ee707b332980915c6f2",
+      "content_type": "text/html; charset=utf-8"
+    }
+  ]
+}
