@@ -51,9 +51,11 @@ const step = (name, details) => { report.checks.push({ name, passed: true, detai
   const renderedDashes=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-maritime-dashes']}).map(f=>f.geometry));
   assert(renderedDashes.length>0); step('south-sea-rendered',{visible_features:renderedDashes.length,country_labels:await checkLabels()}); await screenshot('south-sea');
   await view([[119,21.5],[123.5,26]]);
+  await page.waitForFunction(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).some(f=>f.properties.name==='中国台湾省'),undefined,{timeout:15000});
   let regions=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).map(f=>f.properties.name));
   assert(regions.includes('中国台湾省'),'Chinese Taiwan label must actually render'); step('taiwan-region-rendered',{regions,country_labels:await checkLabels()}); await screenshot('taiwan');
   await view([[113.35,22.05],[114.6,22.7]]);
+  await page.waitForFunction(()=>{const names=window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).map(f=>f.properties.name);return names.includes('中国香港特别行政区')&&names.includes('中国澳门特别行政区');},undefined,{timeout:15000});
   regions=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).map(f=>f.properties.name));
   assert(regions.includes('中国香港特别行政区') && regions.includes('中国澳门特别行政区'),'Hong Kong and Macao Chinese regional labels must render');
   step('hong-kong-macao-rendered',{regions,country_labels:await checkLabels()}); await screenshot('hong-kong-macao');

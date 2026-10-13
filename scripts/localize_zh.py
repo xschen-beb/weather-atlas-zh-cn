@@ -200,6 +200,7 @@ function waZhCityMatches(cities,query){const norm=s=>String(s||"").normalize("NF
 '''
     app = helpers + app
     patch('function nv(N){', 'function waBaseMapStyle(N){')
+    patch('fx(),Vc(', 'fx(),qt.moveLayer("china-region-labels"),Vc(')
     patch('const ee=c??P.county', 'P=waZhChinaAddress(P);const ee=c??P.county')
     app = (LOCALE / "map-style.js").read_text() + '\n' + app
 
