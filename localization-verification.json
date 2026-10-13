@@ -1,4 +1,6 @@
 {
+  "map_geometry_and_filters_checked": true,
+  "reverse_geocoder_regions_checked": true,
   "language": "zh-CN",
   "cities_checked": 4598,
   "terminology_checked": true,

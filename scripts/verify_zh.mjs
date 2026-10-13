@@ -39,7 +39,7 @@ const context = vm.createContext({ H0: {}, Z0: value => value, document, navigat
 const app = source.slice(source.indexOf('const Yc=Z0('), source.indexOf('const Lh='))
                   .replaceAll('import.meta.url', '"https://example.invalid/assets/index.js"');
 try {
-  vm.runInContext(app + '\nglobalThis.testApi={Og,Ht,dl,Ui,$c,ul,waZhHour,waZhTimeZone,waZhCityMatches,waZhError,Gc,vg,ox,lx,ex,cx,$v,ix,dx,nv};', context);
+  vm.runInContext(app + '\nglobalThis.testApi={Og,Ht,dl,Ui,$c,ul,waZhHour,waZhTimeZone,waZhCityMatches,waZhError,Gc,vg,ox,lx,ex,cx,$v,ix,dx,nv,waZhChinaAddress};', context);
 } catch (error) {
   console.error(error.name + ': ' + error.message);
   process.exit(1);
@@ -81,7 +81,11 @@ assert.equal(citiesData.rows.length, 4598);
 const cities = citiesData.rows.map((row, index) => {
   assert(/[\u3400-\u9fff]/.test(row[0]), `Chinese city: ${row[8]}`);
   assert(/[\u3400-\u9fff]/.test(row[1]), `Chinese region: ${row[9]}`);
-  assert.deepEqual(row.slice(2, 8), originalCities.rows[index].slice(2, 8), 'Geographical and statistical inputs remain unchanged');
+  const original = originalCities.rows[index];
+  const regional = ['Taiwan','Hong Kong S.A.R.','Macau S.A.R'].includes(original[1]);
+  const expected = original.slice(2,8); if(regional) expected[4]=0;
+  assert.deepEqual(row.slice(2,8), expected, 'Coordinates, population, zoom and elevation remain unchanged');
+  if(regional) { assert(row[1].startsWith('中国')); assert.equal(row[9], 'China'); assert.equal(row[10],original[1]); assert.equal(row[6],0); }
   return { name: row[0], country: row[1], aliases: [row[8], row[9]] };
 });
 for (const [query, wanted] of [['上海', '上海'], ['Shanghai', '上海'], ['北京', '北京'], ['Shenzhen', '深圳'], ['San Francisco', '旧金山']]) {
@@ -127,7 +131,47 @@ assert(!/Forecast|Feels|Humidity|gusts|Sunshine/.test(forecastText), forecastTex
 const style = api.nv('https://example.invalid/coastline.json');
 assert(style.layers.find(layer => layer.id === 'place-country').layout['text-field'].some(value => Array.isArray(value) && value[1] === 'name:zh'));
 
-const report = { language: 'zh-CN', cities_checked: cities.length, terminology_checked: true,
+// Execute map filter expressions for the affected labels and boundary schemas.
+const expression=(e, properties, within=false)=>{
+  if(!Array.isArray(e)) return e;
+  const [op,...args]=e;
+  if(op==='get')return properties[args[0]];
+  if(op==='coalesce')return args.map(x=>expression(x,properties,within)).find(x=>x!==undefined&&x!==null);
+  if(op==='match')return args[1].includes(expression(args[0],properties,within))?args[2]:args[3];
+  if(op==='all')return args.every(x=>expression(x,properties,within));
+  if(op==='any')return args.some(x=>expression(x,properties,within));
+  if(op==='!')return !expression(args[0],properties,within);
+  if(op==='==')return expression(args[0],properties,within)===expression(args[1],properties,within);
+  if(op==='!=')return expression(args[0],properties,within)!==expression(args[1],properties,within);
+  if(op==='has')return Object.hasOwn(properties,args[0]);
+  if(op==='within')return within;
+  throw new Error('Unsupported test expression '+op);
+};
+const countryFilter=style.layers.find(x=>x.id==='place-country').filter;
+for(const name of ['Taiwan','Hong Kong','Macau','台湾','香港','澳门']) assert.equal(expression(countryFilter,{class:'country',name}),false);
+for(const iso_a2 of ['TW','HK','MO']) assert.equal(expression(countryFilter,{class:'country',name:'other',iso_a2}),false);
+for(const name of ['China','Japan','France']) assert.equal(expression(countryFilter,{class:'country',name}),true);
+const borderFilter=style.layers.find(x=>x.id==='boundary-country').filter;
+for(const name of ['China','Taiwan','Hong Kong','Macau','CN','TW','HK','MO']) assert.equal(expression(borderFilter,{admin_level:2,adm0_l:name}),false);
+assert.equal(expression(borderFilter,{admin_level:2,adm0_l:'France',adm0_r:'Germany'}),true);
+assert.equal(expression(borderFilter,{admin_level:2},true),false);
+for(const country_code of ['tw','hk','mo']) {
+  const address=api.waZhChinaAddress({country_code,country:'external result',city:'test'});
+  assert.equal(address.country,'中国'); assert.equal(address.country_code,'cn'); assert.equal(address.city,'test');
+}
+assert.equal(api.waZhChinaAddress({country:'Taiwan'}).state,'台湾省');
+assert.equal(api.waZhChinaAddress({country_code:'fr',country:'法国'}).country,'法国');
+assert(style.layers.some(x=>x.id==='china-maritime-dashes'));
+assert.equal(style.sources['china-map'].data,'https://example.invalid/china-map.geojson');
+const geography=JSON.parse(await fs.readFile(path.join(dist,'data/china-map.geojson'),'utf8'));
+const originalGeography=JSON.parse(await fs.readFile(path.join(root,'localization/maps/china-standard.geojson'),'utf8'));
+const dashes=geography.features.find(f=>f.properties.kind==='maritime-dashes');
+assert.deepEqual(dashes.geometry,originalGeography.features.find(f=>f.geometry.type==='MultiLineString'&&f.geometry.coordinates.length===10).geometry);
+assert.equal(dashes.geometry.coordinates.filter(line=>Math.max(...line.map(p=>p[1]))<23).length,9);
+for(const code of ['710000','810000','820000']) assert(originalGeography.features.some(f=>f.properties.code===code));
+assert.equal(geography.features.filter(f=>f.properties.kind==='region-label').length,3);
+
+const report = { map_geometry_and_filters_checked:true, reverse_geocoder_regions_checked:true, language: 'zh-CN', cities_checked: cities.length, terminology_checked: true,
   bilingual_search_checked: true, dates_hours_and_months_checked: true,
   climate_panel_checked: true, monthly_table_checked: true, forecast_text_checked: true,
   checks: 'Non-browser execution of the localized presentation logic and scientific-input comparison.',

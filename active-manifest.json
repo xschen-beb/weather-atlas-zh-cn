@@ -13,9 +13,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-4975e81c60f2.js",
-      "bytes": 1168432,
-      "sha256": "4975e81c60f2d5257eeea46421991d46f2aee908bc014fbfaff17573f3f59697"
+      "path": "assets/index-zh-CN-6908105fb045.js",
+      "bytes": 1172106,
+      "sha256": "6908105fb0453d4695a497d3560a49103989ca0d55ebf234928b7b356617b1dc"
     },
     {
       "path": "assets/live.worker-C5u4iOje.js",
@@ -28,9 +28,14 @@
       "sha256": "10f876a85037d724317b579c4a99f60ad41836de2674fb591936efbf1b1e80c3"
     },
     {
+      "path": "data/china-map.geojson",
+      "bytes": 597955,
+      "sha256": "c4789b5db212bd4118f82eff0df74b4e9369ba1ef41c750112e03582e41bfcea"
+    },
+    {
       "path": "data/cities.json",
-      "bytes": 368161,
-      "sha256": "ac92728586fb3bb50c2e6bbe1caf82d49cb8d7ee4de49a2d677932a3775b0733"
+      "bytes": 382429,
+      "sha256": "773026a13e44c6157896c7c439ed0218ce6742e752bb44a1e5df16a6985046c3"
     },
     {
       "path": "data/climate/cells.bin",
@@ -110,7 +115,7 @@
     {
       "path": "index.html",
       "bytes": 2549,
-      "sha256": "4b7450cf306d94595604b4b2f0af243bd74b5c3329a2f921f470940cb0673bfa"
+      "sha256": "62297e576e8ff538f73ecb112b0a091184b39f53d1b050c966766c1382152b3b"
     }
   ]
 }

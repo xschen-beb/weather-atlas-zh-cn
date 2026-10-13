@@ -182,7 +182,7 @@ def main() -> None:
     patch('"text-letter-spacing":.2', '"text-letter-spacing":.04')
     patch('"text-letter-spacing":.12', '"text-letter-spacing":.02')
     patch('"text-letter-spacing":.15', '"text-letter-spacing":.03')
-    patch('elev:L[7]??null}))}', 'elev:L[7]??null,aliases:[L[8],L[9]].filter(Boolean)}))}')
+    patch('elev:L[7]??null}))}', 'elev:L[7]??null,aliases:[L[8],L[9],L[10]].filter(Boolean)}))}')
     patch('if(Ns=0,N.length<2)', 'if(Ns=0,N.length<(/[\\u3400-\\u9fff]/.test(N)?1:2))')
     search_old = 'const I=Na.filter(A=>Rh(A.name).startsWith(N)),L=Na.filter(A=>!Rh(A.name).startsWith(N)&&Rh(`${A.name} ${A.country}`).includes(N));Qn=[...I,...L].slice(0,8)'
     patch(search_old, 'Qn=waZhCityMatches(Na,N).slice(0,8)')
@@ -199,6 +199,10 @@ function waZhTimeZone(zone){try{return new Intl.DateTimeFormat("zh-CN",{timeZone
 function waZhCityMatches(cities,query){const norm=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();const needle=norm(query);const first=[],other=[];for(const city of cities){const names=[city.name,...(city.aliases||[])];if(names.some(name=>norm(name).startsWith(needle)))first.push(city);else if(norm([city.name,city.country,...(city.aliases||[])].join(" ")).includes(needle))other.push(city)}return[...first,...other]}
 '''
     app = helpers + app
+    patch('function nv(N){', 'function waBaseMapStyle(N){')
+    patch('const ee=c??P.county', 'P=waZhChinaAddress(P);const ee=c??P.county')
+    app = (LOCALE / "map-style.js").read_text() + '\n' + app
+
     digest = hashlib.sha256((vendor + app).encode()).hexdigest()[:12]
     bundle = f"index-zh-CN-{digest}.js"
     for old in (DIST / "assets").glob('index-*.js'):
@@ -230,8 +234,13 @@ function waZhCityMatches(cities,query){const norm=s=>String(s||"").normalize("NF
         assert row[0] == item["name_en"] and row[1] == item["country_en"]
         old_name, old_country = row[:2]
         row[0], row[1] = item["name_zh"], countries[old_country]
-        row.extend([old_name, old_country])
-    cities["fields"].extend(["name_en", "country_en"])
+        if old_country in {"Taiwan", "Hong Kong S.A.R.", "Macau S.A.R"}:
+            row[6] = 0  # These cities are not national capitals.
+            row.extend([old_name, "China", old_country])
+        else:
+            row.extend([old_name, old_country, ""])
+
+    cities["fields"].extend(["name_en", "country_en", "region_en"])
     (DIST / "data/cities.json").write_text(json.dumps(cities, ensure_ascii=False, separators=(',', ':')) + '\n')
     (DIST / "assets/zh-CN.css").write_text((LOCALE / "zh-CN.css").read_text())
 

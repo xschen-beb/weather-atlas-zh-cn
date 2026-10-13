@@ -1,9 +1,9 @@
 {
   "language": "zh-CN",
   "translated_literal_count": 159,
-  "template_and_context_patch_count": 264,
+  "template_and_context_patch_count": 266,
   "cities": 4598,
   "countries_regions": 208,
-  "bundle": "index-zh-CN-4975e81c60f2.js",
+  "bundle": "index-zh-CN-6908105fb045.js",
   "upstream_bundle_sha256": "e2a1c556864b0d8d720a1490511c1228e1682571ce7b07e8e812c132975c81fd"
 }

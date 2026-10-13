@@ -1,0 +1,14 @@
+{
+  "source": "https://geojson.cn/api/tiandi/100000.json",
+  "description": "天地图省级行政区划，经 GeoJSON.CN 转换；CGCS2000 (EPSG:4490) 经纬度用于地图显示。",
+  "source_date": "2025/12/16 00:08:02",
+  "source_sha256": "048838e256ddae83b48804b7ffcffce90347ef60628d077ec8f51438aa2ea37c",
+  "geometry_processing": "34 个省级面合并后提取外轮廓，拓扑保持简化容差 0.0002°；源数据十个断续线段逐坐标保留，其中南海九段与台湾岛东侧一段。",
+  "attribution": {
+    "date": "2025/12/16 00:08:02",
+    "copyright": "Copyright (c) 2025 GeoJSON.CN",
+    "copyrightShort": "GeoJSON.CN",
+    "copyrightUrl": "https://geojson.cn"
+  },
+  "visual_verification": "尚未通过浏览器/WebGL 渲染检查；不声称本项目已获地图审图批准。"
+}
