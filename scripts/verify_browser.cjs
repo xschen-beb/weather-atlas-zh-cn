@@ -32,9 +32,10 @@ const step = (name, details) => { report.checks.push({ name, passed: true, detai
   };
   const view = async (bounds, zoom) => {
     await page.evaluate(({bounds,zoom}) => { const m=window.__wa.map; if(bounds)m.fitBounds(bounds,{animate:false,padding:{left:370,right:25,top:70,bottom:45}}); else m.jumpTo(zoom); },{bounds,zoom});
-    await page.waitForFunction(() => window.__wa.map.isSourceLoaded('china-map') && window.__wa.map.areTilesLoaded(), undefined, { timeout:60000 });
-    // One render event ensures the just-loaded tiles have been drawn.
-    await page.evaluate(() => new Promise(resolve => { window.__wa.map.once('render',resolve); window.__wa.map.triggerRepaint(); }));
+    await page.waitForFunction(() => window.__wa.map.isSourceLoaded('china-map') && window.__wa.map.isSourceLoaded('omt'), undefined, { timeout:60000 });
+    // DEM requests can continue while live terrain refreshes; wait for the map
+    // and vector labels under test, then wait for an actual rendered frame.
+    assert(await page.evaluate(() => new Promise(resolve => { const t=setTimeout(()=>resolve(false),10000); window.__wa.map.once('render',()=>{clearTimeout(t);resolve(true)}); window.__wa.map.triggerRepaint(); })), 'Map must render a fresh frame');
   };
   const checkLabels = async () => {
     const labels=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['place-country']}).map(f=>f.properties));
