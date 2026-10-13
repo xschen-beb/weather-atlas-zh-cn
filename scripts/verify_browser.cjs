@@ -49,6 +49,9 @@ const step = (name, details) => { report.checks.push({ name, passed: true, detai
   step('china-overview-rendered',{...visible,country_labels:await checkLabels()}); await screenshot('china-overview');
   await view([[105,1],[124,25]]);
   const renderedDashes=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-maritime-dashes']}).map(f=>f.geometry));
+  const regionalLabelPositions=await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).map(f=>{const point=window.__wa.map.project(f.geometry.coordinates);return{name:f.properties.name,x:point.x,y:point.y}}));
+  const hk=regionalLabelPositions.find(p=>p.name==='中国香港特别行政区'),mo=regionalLabelPositions.find(p=>p.name==='中国澳门特别行政区');
+  assert(!hk||!mo||Math.hypot(hk.x-mo.x,hk.y-mo.y)>120,'Regional labels must not overlap at overview scale');
   assert(renderedDashes.length>0); step('south-sea-rendered',{visible_features:renderedDashes.length,country_labels:await checkLabels()}); await screenshot('south-sea');
   await view([[119,21.5],[123.5,26]]);
   await page.waitForFunction(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).some(f=>f.properties.name==='中国台湾省'),undefined,{timeout:15000});

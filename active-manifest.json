@@ -13,9 +13,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-96553d9dc23a.js",
-      "bytes": 1172168,
-      "sha256": "96553d9dc23aca7ed2dac2f53a433b541c3b1cf816ef2a84acbef8932a4e85b5"
+      "path": "assets/index-zh-CN-5dec95288aed.js",
+      "bytes": 1172242,
+      "sha256": "5dec95288aedddb759541326f04ec4898230c095aa0a9b92a29751f2f46c772f"
     },
     {
       "path": "assets/live.worker-C5u4iOje.js",
@@ -115,7 +115,7 @@
     {
       "path": "index.html",
       "bytes": 2549,
-      "sha256": "700d6f08e91ccc3e687aaed9860b862c2a7c15c252189be5531acf8e4541dd32"
+      "sha256": "f7e6c95740fe35f93a936252396280152aaf851c5454761fd8b31bd027f3fe99"
     }
   ]
 }
