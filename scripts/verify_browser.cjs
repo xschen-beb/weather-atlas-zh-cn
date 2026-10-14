@@ -78,6 +78,24 @@ const step = (name, details) => { report.checks.push({ name, passed: true, detai
   }
   await page.locator('#search').fill('Taipei'); await page.locator('#searchResults li').first().click();
   await page.waitForFunction(()=>{const c=document.querySelector('#card');return c&&!c.classList.contains('hidden')&&c.textContent.includes('中国');},undefined,{timeout:45000});
+  // Search text can appear before temperature files arrive. Require the full
+  // detail reply instead of treating a visible place name as loading success.
+  const loadedDetails = [];
+  await page.evaluate(() => {
+    window.__wa.climate.worker.addEventListener('message', event => {
+      if(event.data.type==='detail' && event.data.result) window.__waDetailLoaded=event.data.result.loaded;
+    });
+  });
+  await page.evaluate(()=>window.__wa.climate.showCard(121.5654,25.033,true));
+  await page.waitForFunction(()=>['feels','tmax','tmin','precip','sun'].every(v=>window.__waDetailLoaded?.includes(v)),undefined,{timeout:45000});
+  assert(!(await page.locator('#card').innerText()).includes('数据加载失败'),'Complete Taipei details must load');
+  loadedDetails.push(...await page.evaluate(()=>window.__waDetailLoaded));
+  step('complete-climate-details',{loaded:loadedDetails});
+  const extra = page.locator('#card button').filter({hasText:'查看云量'});
+  if(await extra.count()) await extra.click();
+  await page.waitForFunction(()=>window.__waDetailLoaded?.length===11,undefined,{timeout:45000});
+  assert(!(await page.locator('#card').innerText()).includes('数据加载失败'),'Optional climate details must load');
+  step('all-climate-details',{loaded:await page.evaluate(()=>window.__waDetailLoaded)});
   const detail=await page.locator('#card').innerText(); assert(detail.includes('中国')); step('taipei-detail',{text:detail.slice(0,180)}); await screenshot('taipei-detail');
   assert(!report.errors.some(e=>e.type==='pageerror'||/failed to compile|style.*invalid|filter.*invalid/i.test(e.text||'')),JSON.stringify(report.errors));
   report.passed=true;

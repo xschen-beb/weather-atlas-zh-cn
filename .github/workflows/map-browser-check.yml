@@ -2,7 +2,7 @@ name: Map browser check
 on:
   push:
     branches: [main]
-    paths: ['dist/**', 'localization/**', 'scripts/verify_browser.cjs', '.github/workflows/map-browser-check.yml']
+    paths: ['dist/**', 'localization/**', 'scripts/verify_browser.cjs', 'scripts/verify_auth_browser.cjs', 'scripts/verify_climate_transport.mjs', '.github/workflows/map-browser-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +22,9 @@ jobs:
       - name: Install Chinese display fonts
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
       - name: Check data and Chinese presentation
-        run: node scripts/verify.mjs && node scripts/verify_zh.mjs
+        run: node scripts/verify.mjs && node scripts/verify_zh.mjs && node scripts/verify_climate_transport.mjs
+      - name: Check authenticated climate requests
+        run: node scripts/verify_auth_browser.cjs
       - name: Run WebGL browser checks
         run: node scripts/verify_browser.cjs
       - name: Preserve browser evidence

@@ -42,6 +42,8 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory dist
 
 历史气候数据加载自副本的 `dist/data/climate/`，不需要向原站请求气候数据。气候与实时天气的计算 Worker、历史数据及筛选阈值保留原值；中文前端和地名经过修改，来源归属说明保留。
 
+私有站点的气候文件由已登录页面读取，再将原始字节传给计算 Worker。加载适配层仅允许本站 `data/climate/` 中列出的文件，使用访问者现有会话，不包含授权令牌；原始解码、校验和计算模块保持不变。文件请求不复用缓存中的授权错误，失败后可以重新请求。
+
 以下功能仍需要联网，并沿用原站使用的公共服务：
 
 | 功能 | 服务 |
@@ -88,3 +90,5 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory dist
 重建地图图层：安装 `shapely>=2` 后执行 `python3 scripts/build_map.py`，再执行 `python3 scripts/localize_zh.py` 更新入口及文件校验清单。正常运行网站无需安装此依赖。
 
 浏览器自动核验由 `.github/workflows/map-browser-check.yml` 执行，检查地图实际图层、台港澳标签、城市搜索和台北详情，保存截图与运行结果。运行脚本为 `scripts/verify_browser.cjs`；其浏览器依赖只用于测试，正常启动网站不需要安装。
+
+`node scripts/verify_climate_transport.mjs` 检查会话加载适配层、401 后重试及请求范围。`scripts/verify_auth_browser.cjs` 在实际 Chromium 中使用测试服务器重现“页面有权限而 Worker 直接请求返回 401”，读取真实历史数据并验证邓州市全部 11 个变量。地图浏览器核验同时要求基础详情与扩展详情完整加载；页面显示地点名称或已有概率曲线不能单独作为加载成功的依据。

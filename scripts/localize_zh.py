@@ -198,7 +198,15 @@ function waZhHour(t,zone){try{return Number(new Intl.DateTimeFormat("zh-CN",{hou
 function waZhTimeZone(zone){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:zone,timeZoneName:"longGeneric"}).formatToParts(new Date()).find(p=>p.type==="timeZoneName").value}catch{return"该地点的当地时间"}}
 function waZhCityMatches(cities,query){const norm=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();const needle=norm(query);const first=[],other=[];for(const city of cities){const names=[city.name,...(city.aliases||[])];if(names.some(name=>norm(name).startsWith(needle)))first.push(city);else if(norm([city.name,city.country,...(city.aliases||[])].join(" ")).includes(needle))other.push(city)}return[...first,...other]}
 '''
-    app = helpers + app
+    worker_adapter = (LOCALE / "climate.session.worker.js").read_text()
+    worker_digest = hashlib.sha256(worker_adapter.encode()).hexdigest()[:12]
+    worker_bundle = f"climate.session.worker-{worker_digest}.js"
+    for old in (DIST / "assets").glob('climate.session.worker-*.js'):
+        old.unlink()
+    (DIST / "assets" / worker_bundle).write_text(worker_adapter)
+    patch('new Worker(new URL(""+new URL("climate.worker-BYFoMrb0.js",import.meta.url).href,import.meta.url),{type:"module"})',
+          f'waClimateWorker(new URL("{worker_bundle}",import.meta.url))')
+    app = (LOCALE / "climate-transport.js").read_text() + '\n' + helpers + app
     patch('function nv(N){', 'function waBaseMapStyle(N){')
     patch('fx(),Vc(', 'fx(),qt.moveLayer("china-region-labels"),Vc(')
     patch('const ee=c??P.county', 'P=waZhChinaAddress(P);const ee=c??P.county')
