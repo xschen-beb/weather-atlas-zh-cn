@@ -1,5 +1,5 @@
 {
-  "source_commit": "3e82be73000f3637c097c7bf5d543d15d28283f2",
+  "source_commit": "98ac26f9c829ecf3c702bf2d422340bdfccba649",
   "engine": "Chromium / WebGL",
   "passed": true,
   "checks": [
@@ -17,9 +17,7 @@
       "details": {
         "outline": 6,
         "dashes": 1,
-        "regions": [
-          "中国台湾省"
-        ],
+        "regions": [],
         "country_labels": [
           "摩纳哥",
           "黑山",
@@ -113,6 +111,7 @@
       "passed": true,
       "details": {
         "visible_features": 3,
+        "regions": [],
         "country_labels": [
           "柬埔寨",
           "老挝",
@@ -121,22 +120,56 @@
       }
     },
     {
-      "name": "taiwan-region-rendered",
+      "name": "taiwan-regional-label-hidden",
       "passed": true,
       "details": {
-        "regions": [
-          "中国台湾省"
+        "regions": [],
+        "city_labels": [
+          "长汀县",
+          "三明",
+          "河源",
+          "龙岩",
+          "梅州",
+          "潮州",
+          "赣州",
+          "汕头",
+          "厦门",
+          "漳州",
+          "马公",
+          "苗栗",
+          "宜兰",
+          "南投",
+          "台东",
+          "花莲",
+          "莆田",
+          "嘉义",
+          "泉州",
+          "中坜区",
+          "台南",
+          "福州",
+          "台中",
+          "高雄",
+          "台北"
         ],
         "country_labels": []
       }
     },
     {
-      "name": "hong-kong-macao-rendered",
+      "name": "hong-kong-macao-regional-label-hidden",
       "passed": true,
       "details": {
-        "regions": [
-          "中国澳门特别行政区",
-          "中国香港特别行政区"
+        "regions": [],
+        "city_labels": [
+          "肇庆",
+          "江门",
+          "澳门",
+          "佛山",
+          "珠海",
+          "东莞",
+          "广州",
+          "惠州",
+          "香港",
+          "深圳"
         ],
         "country_labels": []
       }
@@ -170,7 +203,16 @@
       }
     }
   ],
-  "errors": [],
+  "errors": [
+    {
+      "type": "console",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "type": "console",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
   "screenshots": [
     "china-overview.jpg",
     "south-sea.jpg",
@@ -181,10 +223,9 @@
     "search-macao.jpg",
     "taipei-detail.jpg"
   ],
-  "workflow_run_url": "https://github.com/xschen-beb/weather-atlas-zh-cn/actions/runs/38439497735",
+  "workflow_run_url": "https://github.com/xschen-beb/weather-atlas-zh-cn/actions/runs/38492815920",
   "manual_screenshot_review": {
     "completed": true,
-    "scope": "South China Sea, Taiwan, Hong Kong and Macao; overview label spacing and Chinese regional labels."
+    "scope": "Regional labels hidden in Taiwan and Hong Kong/Macao views; ordinary city weather labels remain visible."
   }
 }
-
