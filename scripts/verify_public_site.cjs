@@ -27,19 +27,33 @@ let browser, page;
   assert.equal(new URL(page.url()).origin, origin, 'Must not redirect to account sign-in');
   report.files = await page.evaluate(async files => {
     const results = [];
+    const appEntry = '/' + files.find(file=>/^assets\/index-zh-CN-.*\.js$/.test(file.path)).path;
     for(let i=0;i<files.length;i+=4) {
       results.push(...await Promise.all(files.slice(i,i+4).map(async file => {
         const pathname = file.path === 'index.html' ? '/' : '/' + file.path;
         const response = await fetch(new URL(pathname, location.href), { credentials: 'omit', cache: 'no-store' });
         const bytes = await response.arrayBuffer();
         const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)), b=>b.toString(16).padStart(2,'0')).join('');
-        return { file:file.path, status:response.status, bytes:bytes.byteLength,
+        const result = { file:file.path, status:response.status, bytes:bytes.byteLength,
           sha256_matches:digest===file.sha256, credentials:'omit' };
+        if(file.path==='index.html') {
+          // Hosting injects its own integration script into HTML. Verify the
+          // expected application module; byte hashes remain strict for assets.
+          const doc = new DOMParser().parseFromString(new TextDecoder().decode(bytes),'text/html');
+          result.expected_app_entry = Array.from(doc.querySelectorAll('script[type="module"][src]')).some(script=>{
+            const url=new URL(script.getAttribute('src'),location.href);
+            return url.origin===location.origin&&url.pathname===appEntry;
+          });
+          result.expected_title = doc.title==='天气与气候地图';
+        }
+        return result;
       })));
     }
     return results;
   }, manifest.files);
-  assert(report.files.every(file=>file.status===200&&file.sha256_matches), 'Anonymous runtime file verification: '+JSON.stringify(report.files.filter(file=>file.status!==200||!file.sha256_matches)));
+  const validFile = file=>file.status===200&&(file.file==='index.html'
+    ? file.expected_app_entry&&file.expected_title : file.sha256_matches);
+  assert(report.files.every(validFile), 'Anonymous runtime file verification: '+JSON.stringify(report.files.filter(file=>!validFile(file))));
   await page.waitForFunction(()=>window.__wa?.climate?.meta,undefined,{timeout:90000});
   for (const spot of [{ name:'香港',lon:114.1694,lat:22.3193,dem:10 },
     { name:'邓州市',lon:111.99,lat:32.64,dem:121 },
