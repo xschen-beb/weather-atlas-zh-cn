@@ -162,6 +162,7 @@ for(const country_code of ['tw','hk','mo']) {
 assert.equal(api.waZhChinaAddress({country:'Taiwan'}).state,'台湾省');
 assert.equal(api.waZhChinaAddress({country_code:'fr',country:'法国'}).country,'法国');
 assert(style.layers.some(x=>x.id==='china-maritime-dashes'));
+assert.equal(style.layers.find(x=>x.id==='china-region-labels').layout.visibility,'none');
 assert.equal(style.sources['china-map'].data,'https://example.invalid/china-map.geojson');
 const geography=JSON.parse(await fs.readFile(path.join(dist,'data/china-map.geojson'),'utf8'));
 const originalGeography=JSON.parse(await fs.readFile(path.join(root,'localization/maps/china-standard.geojson'),'utf8'));

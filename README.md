@@ -73,7 +73,7 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory dist
 
 把 `dist/` 作为静态网站根目录部署即可。保持 `assets/` 和 `data/` 的相对路径，使用 HTTPS，不要将缺失 `.bin` 或 `.js` 请求改写为 HTML 页面。Web Worker 和 WebGL 需要浏览器支持。
 
-本次运行文件和历史计算已经验证；本环境未执行浏览器/WebGL 的视觉和交互验证，不能将数据检查当成完整浏览器验收。
+运行文件和历史计算已通过程序检查；桌面 Chromium / WebGL 浏览器核验结果与截图见 [地图浏览器核验](docs/map-verification/README.md)。
 
 ## 来源与许可状态
 
@@ -83,7 +83,7 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory dist
 
 中国外轮廓使用天地图省级行政区划数据（经 GeoJSON.CN 转换），覆盖 34 个省级区域及附属岛屿。南海九个断续线段以及源图中台湾岛东侧的一段均按原始坐标保留，未手绘或替换为线条虚线效果。地图数据与来源记录位于 `localization/maps/`，运行图层位于 `dist/data/china-map.geojson`。
 
-台湾、香港、澳门分别显示为中国台湾省、中国香港特别行政区、中国澳门特别行政区；内置城市、国家代码和逆地理编码返回值采用统一的中国归属。底图对应的独立国家标签及国界线被过滤，原始快照仅作为来源保存在 `upstream/`。地理数据与图层规则已通过程序检查，桌面 Chromium / WebGL 实际渲染也已通过核验，截图与机器报告见 [地图浏览器核验](docs/map-verification/README.md)。本项目不声称已获得地图审图批准。
+地图不单独显示台湾、香港、澳门的地区标签；保留台北、香港、澳门等普通城市名称。内置城市、国家代码和逆地理编码返回值采用统一的中国归属。底图对应的独立国家标签及国界线被过滤，原始快照仅作为来源保存在 `upstream/`。地理数据与图层规则已通过程序检查，桌面 Chromium / WebGL 实际渲染也已通过核验，截图与机器报告见 [地图浏览器核验](docs/map-verification/README.md)。本项目不声称已获得地图审图批准。
 
 重建地图图层：安装 `shapely>=2` 后执行 `python3 scripts/build_map.py`，再执行 `python3 scripts/localize_zh.py` 更新入口及文件校验清单。正常运行网站无需安装此依赖。
 

@@ -1,7 +1,7 @@
 {
-  "checked_at": "2026-10-13T17:30:55.414Z",
+  "checked_at": "2026-10-14T00:49:08.014Z",
   "runtime_files": 23,
-  "runtime_bytes": 25794308,
+  "runtime_bytes": 25794326,
   "sha256_verified": true,
   "climate_checksums_verified": [
     "feels",
@@ -46,8 +46,8 @@
       "contributing_cells": 10
     }
   ],
-  "annual_map_runtime_ms": 197.80910700000004,
-  "date_map_runtime_ms": 15.936094000000594,
+  "annual_map_runtime_ms": 185.6089349999993,
+  "date_map_runtime_ms": 18.84573300000011,
   "local_fetches": 13,
   "verification_limits": [
     "Browser rendering and WebGL interaction not tested in this environment.",

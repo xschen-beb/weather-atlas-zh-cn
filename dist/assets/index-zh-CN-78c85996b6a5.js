@@ -826,7 +826,7 @@ function nv(coastUrl) {
   style.layers.splice(insert,0,
     {id:'china-outline',type:'line',source:'china-map',filter:['==',['get','kind'],'outline'],layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'rgba(45,45,55,0.55)','line-width':['interpolate',['linear'],['zoom'],1,.6,5,1.1,10,2]}},
     {id:'china-maritime-dashes',type:'line',source:'china-map',filter:['==',['get','kind'],'maritime-dashes'],layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'rgba(45,45,55,0.7)','line-width':['interpolate',['linear'],['zoom'],0,.8,5,1.5,10,2]}});
-  style.layers.push({id:'china-region-labels',type:'symbol',source:'china-map',minzoom:3,filter:['all',['==',['get','kind'],'region-label'],['any',['==',['get','name'],'中国台湾省'],['>=',['zoom'],8]]],layout:{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],3,10,7,12],'text-max-width':9,'text-padding':4,'text-allow-overlap':true},paint:{'text-color':'rgba(44,47,51,0.72)','text-halo-color':'rgba(255,255,255,0.85)','text-halo-width':1.3}});
+  style.layers.push({id:'china-region-labels',type:'symbol',source:'china-map',minzoom:3,filter:['all',['==',['get','kind'],'region-label'],['any',['==',['get','name'],'中国台湾省'],['>=',['zoom'],8]]],layout:{visibility:'none','text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],3,10,7,12],'text-max-width':9,'text-padding':4,'text-allow-overlap':true},paint:{'text-color':'rgba(44,47,51,0.72)','text-halo-color':'rgba(255,255,255,0.85)','text-halo-width':1.3}});
   return style;
 }
 
