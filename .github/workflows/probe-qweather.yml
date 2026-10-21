@@ -1,0 +1,28 @@
+name: Probe Suzhou historical observation API
+on:
+  push:
+    branches: [climate-qweather-fetch]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe station and sample dates
+        run: |
+          python - <<'PY'
+          import urllib.request, json
+          urls=['https://q-weather.info/api/weather/58349/']+[f'https://q-weather.info/api/weather/58349/history/?date={d}' for d in ['1991-01-01','2010-01-01','2015-02-15','2015-03-15','2016-01-24','2019-07-01','2020-07-06','2020-12-31']]
+          for u in urls:
+            print('\nURL',u)
+            try:
+              req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0'})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                x=r.read().decode('utf-8','replace')
+              print(x[:4000])
+            except Exception as e: print('ERR',repr(e))
+          PY
