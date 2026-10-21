@@ -1,4 +1,4 @@
-name: Resolve Suzhou ISD station
+name: Extract Suzhou CMA daily climate
 on:
   push:
     branches: [climate-data-fetch]
@@ -6,46 +6,176 @@ on:
 permissions:
   contents: read
 jobs:
-  resolve:
+  extract:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Search NOAA ISD station history
+      - name: Download CMA V3 archive from Zenodo
+        shell: bash
+        run: |
+          set -euxo pipefail
+          df -h
+          curl -L --fail --retry 5 --retry-delay 5 \
+            'https://zenodo.org/records/20025511/files/SURF_CLI_CHN_MUL_DAY_V3.0.rar?download=1' \
+            -o cma_v3.rar
+          ls -lh cma_v3.rar
+          md5sum cma_v3.rar
+          7z l -ba cma_v3.rar > archive-list.txt
+          grep -E 'SURF_CLI_CHN_MUL_DAY-(TEM-12001|PRE-13011)-(199[1-9]|20(0[0-9]|1[0-9]|20))[0-1][0-9]\.TXT$' archive-list.txt | head -20 || true
+      - name: Extract 1991-2020 temperature and precipitation files
         shell: bash
         run: |
           python - <<'PY'
-          import csv, urllib.request, math
-          urls=[
-            'https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv',
-            'https://www.ncei.noaa.gov/pub/data/noaa/isd-history.txt'
-          ]
-          for url in urls:
-            try:
-              fn=url.rsplit('/',1)[1]
-              urllib.request.urlretrieve(url,fn)
-              print('DOWNLOADED',url,fn)
-            except Exception as e: print('FAIL',url,repr(e))
-          rows=[]
-          try:
-            with open('isd-history.csv',encoding='utf-8-sig',errors='ignore',newline='') as f:
-              r=csv.DictReader(f)
-              print('FIELDS',r.fieldnames)
-              for row in r: rows.append(row)
-          except Exception as e: print('CSV_PARSE_FAIL',repr(e))
-          print('MATCH_58349_OR_SUZHOU')
-          for r in rows:
-            text=' '.join(str(v) for v in r.values()).upper()
-            if '58349' in text or 'SUZHOU' in text or 'SOOCHOW' in text:
-              print(r)
-          print('NEAREST_31.4_120.6')
-          cand=[]
-          for r in rows:
-            try:
-              lat=float(r.get('LAT','')); lon=float(r.get('LON',''))
-            except: continue
-            dist=((lat-31.4)**2+((lon-120.6)*math.cos(math.radians(31.4)))**2)**.5
-            if dist<2.5: cand.append((dist,r))
-          for dist,r in sorted(cand)[:50]: print(round(dist,4),r)
+          import re, subprocess
+          text=open('archive-list.txt',encoding='utf-8',errors='ignore').read().splitlines()
+          paths=[]
+          pat=re.compile(r'(\S*SURF_CLI_CHN_MUL_DAY-(?:TEM-12001|PRE-13011)-(?:199[1-9]|20(?:0[0-9]|1[0-9]|20))(?:0[1-9]|1[0-2])\.TXT)$',re.I)
+          for line in text:
+              m=pat.search(line)
+              if m: paths.append(m.group(1))
+          paths=sorted(set(paths))
+          print('SELECTED_FILES',len(paths))
+          print('\n'.join(paths[:10])); print('...'); print('\n'.join(paths[-10:]))
+          open('selected-files.txt','w').write('\n'.join(paths)+'\n')
+          if len(paths)<600:
+              raise SystemExit('Too few matching monthly files; inspect archive layout')
+          subprocess.run(['7z','x','-y','-oextract','cma_v3.rar','@selected-files.txt'],check=True)
           PY
+          du -sh extract
+      - name: Parse station 58349 and aggregate by MM-DD
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from datetime import date
+          import re,csv,json,math,statistics,hashlib
+
+          ROOT=Path('extract'); OUT=Path('out'); OUT.mkdir(exist_ok=True)
+          station='58349'
+          temp={}; precip={}; raw_tem=[]; raw_pre=[]
+
+          def qc_ok(q):
+              # CMA: 0 correct, 1 suspicious, 2 erroneous, 8 missing/no task, 9 not QC'd.
+              # Primary climatology uses code 0 only; raw QC codes are preserved.
+              return str(q)=='0'
+
+          def temp_value(v):
+              try: x=int(v)
+              except: return None
+              if x==32766: return None
+              return x/10.0
+
+          def precip_value(v):
+              try: x=int(v)
+              except: return None
+              if x==32766: return None
+              if x==32700: return 0.05  # trace precipitation, <0.1 mm; retained as representative trace amount
+              if 32000 <= x <= 32999: return (x-32000)/10.0  # pure fog/dew/frost amount
+              if 31000 <= x <= 31999: return (x-31000)/10.0  # rain+snow total
+              if 30000 <= x <= 30999: return (x-30000)/10.0  # snow / mixed precip amount
+              return x/10.0
+
+          for p in ROOT.rglob('SURF_CLI_CHN_MUL_DAY-TEM-12001-*.TXT'):
+              ym=re.search(r'(\d{6})\.TXT$',p.name)
+              if not ym: continue
+              y=int(ym.group(1)[:4])
+              if not 1991<=y<=2020: continue
+              with p.open('r',encoding='gb18030',errors='ignore') as f:
+                  for line in f:
+                      a=line.split()
+                      if len(a)<13 or a[0]!=station: continue
+                      yy,mm,dd=map(int,a[4:7]); d=date(yy,mm,dd)
+                      rec={'date':d.isoformat(),'mmdd':d.strftime('%m-%d'),'station':a[0],
+                           'lat_dm':a[1],'lon_dm':a[2],'elev_0p1m':a[3],
+                           'tmean_raw':a[7],'tmax_raw':a[8],'tmin_raw':a[9],
+                           'qc_tmean':a[10],'qc_tmax':a[11],'qc_tmin':a[12]}
+                      rec['tmean_c']=temp_value(a[7]) if qc_ok(a[10]) else None
+                      rec['tmax_c']=temp_value(a[8]) if qc_ok(a[11]) else None
+                      rec['tmin_c']=temp_value(a[9]) if qc_ok(a[12]) else None
+                      temp[d]=rec; raw_tem.append(rec)
+
+          for p in ROOT.rglob('SURF_CLI_CHN_MUL_DAY-PRE-13011-*.TXT'):
+              ym=re.search(r'(\d{6})\.TXT$',p.name)
+              if not ym: continue
+              y=int(ym.group(1)[:4])
+              if not 1991<=y<=2020: continue
+              with p.open('r',encoding='gb18030',errors='ignore') as f:
+                  for line in f:
+                      a=line.split()
+                      if len(a)<13 or a[0]!=station: continue
+                      yy,mm,dd=map(int,a[4:7]); d=date(yy,mm,dd)
+                      rec={'date':d.isoformat(),'mmdd':d.strftime('%m-%d'),'station':a[0],
+                           'pre_20_08_raw':a[7],'pre_08_20_raw':a[8],'pre_20_20_raw':a[9],
+                           'qc_pre_20_08':a[10],'qc_pre_08_20':a[11],'qc_pre_20_20':a[12]}
+                      rec['prcp_mm']=precip_value(a[9]) if qc_ok(a[12]) else None
+                      rec['trace_precip']=1 if a[9]=='32700' and qc_ok(a[12]) else 0
+                      precip[d]=rec; raw_pre.append(rec)
+
+          dates=sorted(set(temp)|set(precip))
+          rows=[]
+          for d in dates:
+              t=temp.get(d,{}); p=precip.get(d,{})
+              rows.append({'date':d.isoformat(),'year':d.year,'mmdd':d.strftime('%m-%d'),
+                           'tmean_c':t.get('tmean_c'),'tmax_c':t.get('tmax_c'),'tmin_c':t.get('tmin_c'),
+                           'qc_tmean':t.get('qc_tmean'),'qc_tmax':t.get('qc_tmax'),'qc_tmin':t.get('qc_tmin'),
+                           'prcp_mm':p.get('prcp_mm'),'qc_prcp':p.get('qc_pre_20_20'),'trace_precip':p.get('trace_precip')})
+
+          def write_csv(path,rows,fields):
+              with path.open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
+          fields=['date','year','mmdd','tmean_c','tmax_c','tmin_c','qc_tmean','qc_tmax','qc_tmin','prcp_mm','qc_prcp','trace_precip']
+          write_csv(OUT/'suzhou_58349_1991_2020_daily_qc0.csv',rows,fields)
+
+          buckets={}
+          for r in rows:
+              b=buckets.setdefault(r['mmdd'],{k:[] for k in ['tmean_c','tmax_c','tmin_c','prcp_mm']})
+              for k in b:
+                  x=r[k]
+                  if x is not None:b[k].append(float(x))
+
+          def mean(xs): return statistics.fmean(xs) if xs else None
+          def quant(xs,q):
+              if not xs:return None
+              s=sorted(xs); pos=(len(s)-1)*q; lo=math.floor(pos); hi=math.ceil(pos)
+              return s[lo] if lo==hi else s[lo]*(hi-pos)+s[hi]*(pos-lo)
+
+          agg=[]; d=date(2000,1,1)
+          from datetime import timedelta
+          while d<=date(2000,12,31):
+              mmdd=d.strftime('%m-%d'); b=buckets.get(mmdd,{k:[] for k in ['tmean_c','tmax_c','tmin_c','prcp_mm']}); pr=b['prcp_mm']
+              agg.append({'mmdd':mmdd,
+                'n_tmean':len(b['tmean_c']),'mean_tmean_c':mean(b['tmean_c']),'p10_tmean_c':quant(b['tmean_c'],.1),'p90_tmean_c':quant(b['tmean_c'],.9),
+                'n_tmax':len(b['tmax_c']),'mean_tmax_c':mean(b['tmax_c']),
+                'n_tmin':len(b['tmin_c']),'mean_tmin_c':mean(b['tmin_c']),
+                'n_prcp':len(pr),'mean_prcp_mm':mean(pr),
+                'wet_day_pct':sum(x>=0.1 for x in pr)/len(pr)*100 if pr else None,
+                'trace_or_wet_pct':sum(x>0 for x in pr)/len(pr)*100 if pr else None,
+                'heavy10_pct':sum(x>=10 for x in pr)/len(pr)*100 if pr else None,
+                'heavy25_pct':sum(x>=25 for x in pr)/len(pr)*100 if pr else None})
+              d+=timedelta(days=1)
+          af=list(agg[0]); write_csv(OUT/'suzhou_58349_1991_2020_mmdd_climatology.csv',agg,af)
+
+          meta={'source':'CMA China Surface Climate Daily Data V3.0 (SURF_CLI_CHN_MUL_DAY_V3.0)',
+                'mirror':'Zenodo record 20025511','station':'58349','period':'1991-2020',
+                'temperature_rows':len(raw_tem),'precip_rows':len(raw_pre),'merged_calendar_rows':len(rows),
+                'date_min':rows[0]['date'] if rows else None,'date_max':rows[-1]['date'] if rows else None,
+                'qc_policy':'primary statistics use QC code 0 only; QC codes preserved in daily CSV',
+                'normal_dates_n_tmean_min':min((r['n_tmean'] for r in agg if r['mmdd']!='02-29'),default=0),
+                'normal_dates_n_tmean_max':max((r['n_tmean'] for r in agg if r['mmdd']!='02-29'),default=0),
+                'normal_dates_n_prcp_min':min((r['n_prcp'] for r in agg if r['mmdd']!='02-29'),default=0),
+                'normal_dates_n_prcp_max':max((r['n_prcp'] for r in agg if r['mmdd']!='02-29'),default=0),
+                'feb29_n_tmean':next((r['n_tmean'] for r in agg if r['mmdd']=='02-29'),0),
+                'feb29_n_prcp':next((r['n_prcp'] for r in agg if r['mmdd']=='02-29'),0)}
+          (OUT/'metadata.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('META',json.dumps(meta,ensure_ascii=False))
+          print('FIRST5',json.dumps(agg[:5],ensure_ascii=False))
+          print('JULY_SAMPLE',json.dumps([r for r in agg if r['mmdd'] in ['07-01','07-15','07-31']],ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suzhou-58349-cma-1991-2020
+          path: out/
+          if-no-files-found: error
