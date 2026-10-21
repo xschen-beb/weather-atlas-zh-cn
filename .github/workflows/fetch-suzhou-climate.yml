@@ -12,32 +12,94 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Resolve Suzhou station metadata
+      - name: Download and aggregate Suzhou GSOD 1991-2020
         shell: bash
         run: |
+          mkdir -p climate-output/raw
           python - <<'PY'
-          import urllib.request, math
-          for name in ['ghcnd-stations.txt','ghcnd-inventory.txt']:
-              urllib.request.urlretrieve('https://noaa-ghcn-pds.s3.amazonaws.com/'+name, name)
-          lines=open('ghcnd-stations.txt',encoding='ascii',errors='ignore').read().splitlines()
-          print('MATCH_58349')
-          for x in lines:
-              if '58349' in x: print(x)
-          print('MATCH_SUZHOU')
-          for x in lines:
-              if 'SUZHOU' in x.upper(): print(x)
-          print('NEAREST_TO_31.4_120.6')
-          cand=[]
-          for x in lines:
-              if not x.startswith('CH'): continue
+          import csv, urllib.request, datetime, math, statistics, json, pathlib
+          OUT=pathlib.Path('climate-output'); RAW=OUT/'raw'
+          station='58349099999'
+          allrows=[]
+          for year in range(1991,2021):
+              url=f'https://www.ncei.noaa.gov/data/global-summary-of-the-day/access/{year}/{station}.csv'
+              p=RAW/f'{station}_{year}.csv'
               try:
-                  lat=float(x[12:20]); lon=float(x[21:30])
+                  urllib.request.urlretrieve(url,p)
+              except Exception as e:
+                  print('DOWNLOAD_FAIL',year,repr(e)); continue
+              with p.open(encoding='utf-8-sig',newline='') as f:
+                  r=csv.DictReader(f)
+                  if year==1991: print('HEADER',r.fieldnames)
+                  for row in r:
+                      row['_year']=year; allrows.append(row)
+          print('DOWNLOADED_YEARS', sorted({r['_year'] for r in allrows}))
+          print('RAW_ROWS',len(allrows))
+          def num(v, missing=9000):
+              if v is None:return None
+              s=str(v).strip().replace('*','')
+              if not s:return None
+              try:x=float(s)
+              except:return None
+              if x>=missing:return None
+              return x
+          def f_to_c(x): return (x-32)*5/9 if x is not None else None
+          def inches_to_mm(x): return x*25.4 if x is not None else None
+          clean=[]
+          for r in allrows:
+              try:d=datetime.datetime.strptime(r['DATE'],'%Y-%m-%d').date()
               except: continue
-              dist=((lat-31.4)**2 + ((lon-120.6)*math.cos(math.radians(31.4)))**2)**.5
-              cand.append((dist,x))
-          for _,x in sorted(cand)[:20]: print(x)
-          print('INVENTORY_58349_OR_NEAREST_IDS')
-          ids=[x[:11] for _,x in sorted(cand)[:20]]
-          for x in open('ghcnd-inventory.txt',encoding='ascii',errors='ignore'):
-              if x[:11] in ids or '58349' in x: print(x.rstrip())
+              tf=num(r.get('TEMP')); maxf=num(r.get('MAX')); minf=num(r.get('MIN'))
+              pr=num(r.get('PRCP'),90)
+              fr=str(r.get('FRSHTT') or '').strip()
+              # FRSHTT is 6 positions: fog, rain/drizzle, snow/ice pellets, hail, thunder, tornado/funnel.
+              fr=fr.zfill(6)[-6:] if fr else '000000'
+              rec={
+                'date':d.isoformat(),'year':d.year,'mmdd':d.strftime('%m-%d'),
+                'tmean_c':f_to_c(tf),'tmax_c':f_to_c(maxf),'tmin_c':f_to_c(minf),
+                'prcp_mm':inches_to_mm(pr),
+                'fog':1 if fr[0]=='1' else 0,'rain':1 if fr[1]=='1' else 0,
+                'snow':1 if fr[2]=='1' else 0,'hail':1 if fr[3]=='1' else 0,
+                'thunder':1 if fr[4]=='1' else 0,'tornado':1 if fr[5]=='1' else 0,
+                'frshtt':fr,
+                'name':r.get('NAME',''),'lat':r.get('LATITUDE',''),'lon':r.get('LONGITUDE','')
+              }
+              clean.append(rec)
+          if clean:
+              print('STATION_SAMPLE',clean[0]['name'],clean[0]['lat'],clean[0]['lon'])
+              print('DATE_RANGE',clean[0]['date'],clean[-1]['date'])
+          fields=list(clean[0]) if clean else []
+          with (OUT/'suzhou_58349_1991_2020_daily.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(clean)
+          buckets={}
+          for r in clean:
+              b=buckets.setdefault(r['mmdd'],{k:[] for k in ['tmean_c','tmax_c','tmin_c','prcp_mm','fog','rain','snow','hail','thunder','tornado']})
+              for k in b:
+                  x=r[k]
+                  if x is not None:b[k].append(x)
+          def mean(xs):return statistics.fmean(xs) if xs else None
+          def q(xs,p):
+              if not xs:return None
+              xs=sorted(xs); pos=(len(xs)-1)*p; a=math.floor(pos); b=math.ceil(pos)
+              return xs[a] if a==b else xs[a]*(b-pos)+xs[b]*(pos-a)
+          agg=[]; d=datetime.date(2000,1,1)
+          while d<=datetime.date(2000,12,31):
+              mm=d.strftime('%m-%d'); b=buckets.get(mm,{k:[] for k in ['tmean_c','tmax_c','tmin_c','prcp_mm','fog','rain','snow','hail','thunder','tornado']})
+              pr=b['prcp_mm']
+              rec={'mmdd':mm,'n_days':len(b['tmean_c']),'mean_tmean_c':mean(b['tmean_c']),'p10_tmean_c':q(b['tmean_c'],.10),'p90_tmean_c':q(b['tmean_c'],.90),'mean_tmax_c':mean(b['tmax_c']),'mean_tmin_c':mean(b['tmin_c']),'n_prcp':len(pr),'mean_prcp_mm':mean(pr),'wet_day_pct':(sum(x>=0.1 for x in pr)/len(pr)*100 if pr else None),'heavy10_pct':(sum(x>=10 for x in pr)/len(pr)*100 if pr else None),'heavy25_pct':(sum(x>=25 for x in pr)/len(pr)*100 if pr else None)}
+              for k in ['fog','rain','snow','hail','thunder','tornado']:
+                  rec[k+'_pct']=mean(b[k])*100 if b[k] else None
+              agg.append(rec); d+=datetime.timedelta(days=1)
+          af=list(agg[0])
+          with (OUT/'suzhou_58349_1991_2020_mmdd.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=af); w.writeheader(); w.writerows(agg)
+          meta={'station_code':station,'period':'1991-2020','raw_rows':len(clean),'years_present':sorted(set(r['year'] for r in clean)),'station_names':sorted(set(r['name'] for r in clean)),'normal_day_n_min':min((r['n_days'] for r in agg if r['mmdd']!='02-29'),default=0),'normal_day_n_max':max((r['n_days'] for r in agg if r['mmdd']!='02-29'),default=0),'feb29_n':next((r['n_days'] for r in agg if r['mmdd']=='02-29'),0)}
+          (OUT/'metadata.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('METADATA',json.dumps(meta,ensure_ascii=False))
+          print('BEGIN_AGG_JSON'); print(json.dumps(agg,separators=(',',':'))); print('END_AGG_JSON')
           PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suzhou-58349-gsod-1991-2020
+          path: climate-output/
+          if-no-files-found: error
