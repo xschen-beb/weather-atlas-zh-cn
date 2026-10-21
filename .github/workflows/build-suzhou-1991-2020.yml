@@ -1,0 +1,184 @@
+name: Build Suzhou 1991-2020 climate series
+on:
+  push:
+    branches: [climate-qweather-fetch]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aria2
+          pip install pandas numpy matplotlib requests openpyxl
+      - name: Download CMA V3 archive
+        run: |
+          aria2c -x16 -s16 -k1M --file-allocation=none --max-tries=5 \
+            -o cma_v3.rar 'https://zenodo.org/records/20025511/files/SURF_CLI_CHN_MUL_DAY_V3.0.rar?download=1'
+          echo 'e76eba8bf94e6f8d38b6205d9254d3e8  cma_v3.rar' | md5sum -c -
+          7z l -ba cma_v3.rar > archive-list.txt
+          python - <<'PY'
+          import re
+          xs=[]
+          pat=re.compile(r'(\S*SURF_CLI_CHN_MUL_DAY-(?:TEM-12001|PRE-13011)-(?:199[1-9]|20(?:0[0-9]|1[0-4]|150[1-2]))(?:0[1-9]|1[0-2])\.TXT)$',re.I)
+          # More robust: parse YYYYMM and select 199101..201502
+          xs=[]
+          for line in open('archive-list.txt',encoding='utf-8',errors='ignore'):
+              m=re.search(r'(\S*SURF_CLI_CHN_MUL_DAY-(?:TEM-12001|PRE-13011)-(\d{6})\.TXT)$',line,re.I)
+              if m and 199101 <= int(m.group(2)) <= 201502:
+                  xs.append(m.group(1))
+          xs=sorted(set(xs)); print('CMA_SELECTED_FILES',len(xs))
+          assert len(xs)==580, len(xs)
+          open('selected-files.txt','w').write('\n'.join(xs)+'\n')
+          PY
+          7z x -y -oextract cma_v3.rar @selected-files.txt >/dev/null
+      - name: Fetch q-weather 2015-2020 and build final tables
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from datetime import date,timedelta,datetime,timezone
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          import requests, time, json, re, math
+          import pandas as pd, numpy as np
+
+          OUT=Path('out'); OUT.mkdir(exist_ok=True)
+          ROOT=Path('extract'); ST='58349'
+
+          # ---------- CMA 1991-01-01 .. 2015-02-28 ----------
+          def qc0(x): return str(x)=='0'
+          def tv(x):
+              try:v=int(x)
+              except:return np.nan
+              return np.nan if v==32766 else v/10.0
+          def pv(x):
+              try:v=int(x)
+              except:return np.nan
+              if v==32766:return np.nan
+              if v==32700:return 0.05
+              if 32000<=v<=32999:return (v-32000)/10.0
+              if 31000<=v<=31999:return (v-31000)/10.0
+              if 30000<=v<=30999:return (v-30000)/10.0
+              return v/10.0
+          cma={}
+          for p in ROOT.rglob('*TEM-12001-*.TXT'):
+              for line in p.open(encoding='gb18030',errors='ignore'):
+                  a=line.split()
+                  if len(a)<13 or a[0]!=ST: continue
+                  d=date(*map(int,a[4:7]))
+                  cma.setdefault(d,{})
+                  cma[d].update(tmean_c=tv(a[7]) if qc0(a[10]) else np.nan,
+                                tmax_c=tv(a[8]) if qc0(a[11]) else np.nan,
+                                tmin_c=tv(a[9]) if qc0(a[12]) else np.nan,
+                                qc_tmean=a[10],qc_tmax=a[11],qc_tmin=a[12])
+          for p in ROOT.rglob('*PRE-13011-*.TXT'):
+              for line in p.open(encoding='gb18030',errors='ignore'):
+                  a=line.split()
+                  if len(a)<13 or a[0]!=ST: continue
+                  d=date(*map(int,a[4:7]))
+                  cma.setdefault(d,{})
+                  cma[d].update(prcp_mm=pv(a[9]) if qc0(a[12]) else np.nan,
+                                qc_prcp=a[12],trace_precip=int(a[9]=='32700' and qc0(a[12])))
+          cma_rows=[]
+          for d in sorted(cma):
+              r=cma[d]
+              cma_rows.append({'date':d.isoformat(),'tmean_c':r.get('tmean_c',np.nan),'tmax_c':r.get('tmax_c',np.nan),'tmin_c':r.get('tmin_c',np.nan),'prcp_mm':r.get('prcp_mm',np.nan),'qc_tmean':r.get('qc_tmean'),'qc_tmax':r.get('qc_tmax'),'qc_tmin':r.get('qc_tmin'),'qc_prcp':r.get('qc_prcp'),'trace_precip':r.get('trace_precip',0),'source':'CMA_V3'})
+          cma_df=pd.DataFrame(cma_rows)
+          cma_df['date']=pd.to_datetime(cma_df.date)
+          cma_df.to_csv(OUT/'cma_58349_1991_201502_daily.csv',index=False,encoding='utf-8-sig')
+          print('CMA_ROWS',len(cma_df),cma_df.date.min(),cma_df.date.max())
+
+          # ---------- q-weather hourly observations 2015-01-01 .. 2020-12-31 ----------
+          start=date(2015,1,1); end=date(2020,12,31)
+          dates=[]; d=start
+          while d<=end: dates.append(d); d+=timedelta(days=1)
+          session=requests.Session(); session.headers.update({'User-Agent':'Mozilla/5.0 climate-research'})
+          def fetch(d):
+              u=f'https://q-weather.info/api/weather/58349/history/?date={d.isoformat()}'
+              for attempt in range(6):
+                  try:
+                      rr=session.get(u,timeout=30)
+                      if rr.status_code==200:
+                          j=rr.json(); return d,j.get('res',[]),None
+                      err=f'HTTP {rr.status_code}'
+                  except Exception as e: err=repr(e)
+                  time.sleep(0.4*(attempt+1))
+              return d,[],err
+          results={}; errors=[]
+          with ThreadPoolExecutor(max_workers=4) as ex:
+              futs={ex.submit(fetch,d):d for d in dates}
+              for i,f in enumerate(as_completed(futs),1):
+                  d,res,err=f.result(); results[d]=res
+                  if err: errors.append((d.isoformat(),err))
+                  if i%250==0: print('Q_FETCHED',i,'errors',len(errors))
+                  time.sleep(0.03)
+          print('Q_ERRORS',len(errors),errors[:10])
+
+          hourly=[]; qdaily=[]
+          for d in dates:
+              res=results.get(d,[])
+              Ts=[]; Rs=[]
+              for x in res:
+                  row={'requested_date':d.isoformat(),'time_utc':x.get('time'),'T':x.get('T'),'R1h':x.get('R1h'),'RH':x.get('RH'),'P':x.get('P')}
+                  hourly.append(row)
+                  if isinstance(x.get('T'),(int,float)): Ts.append(float(x['T']))
+                  if isinstance(x.get('R1h'),(int,float)): Rs.append(float(x['R1h']))
+              qdaily.append({'date':d.isoformat(),'n_temp_hours':len(Ts),'tmean_c':np.mean(Ts) if Ts else np.nan,'tmax_c':np.max(Ts) if Ts else np.nan,'tmin_c':np.min(Ts) if Ts else np.nan,'n_prcp_hours':len(Rs),'prcp_mm':np.sum(Rs) if Rs else np.nan,'source':'q-weather_hourly'})
+          pd.DataFrame(hourly).to_csv(OUT/'qweather_58349_2015_2020_hourly.csv',index=False,encoding='utf-8-sig')
+          qdf=pd.DataFrame(qdaily); qdf['date']=pd.to_datetime(qdf.date)
+          # Require enough hourly coverage for a daily statistic.
+          for col in ['tmean_c','tmax_c','tmin_c']:
+              qdf.loc[qdf.n_temp_hours<20,col]=np.nan
+          qdf.loc[qdf.n_prcp_hours<20,'prcp_mm']=np.nan
+          qdf.to_csv(OUT/'qweather_58349_2015_2020_daily.csv',index=False,encoding='utf-8-sig')
+          print('Q_VALID_TEMP_DAYS',qdf.tmean_c.notna().sum(),'Q_VALID_PRCP_DAYS',qdf.prcp_mm.notna().sum())
+
+          # ---------- overlap validation Jan-Feb 2015 ----------
+          ov=cma_df[['date','tmean_c','tmax_c','tmin_c','prcp_mm']].merge(qdf[['date','tmean_c','tmax_c','tmin_c','prcp_mm','n_temp_hours','n_prcp_hours']],on='date',suffixes=('_cma','_q'))
+          metrics={}
+          for var in ['tmean_c','tmax_c','tmin_c','prcp_mm']:
+              z=ov[[var+'_cma',var+'_q']].dropna()
+              if len(z):
+                  diff=z[var+'_q']-z[var+'_cma']
+                  metrics[var]={'n':int(len(z)),'mae':float(diff.abs().mean()),'bias_q_minus_cma':float(diff.mean()),'rmse':float(np.sqrt((diff**2).mean())),'corr':float(z.corr().iloc[0,1]) if len(z)>1 else None}
+          ov.to_csv(OUT/'overlap_2015_jan_feb_validation.csv',index=False,encoding='utf-8-sig')
+          print('OVERLAP_METRICS',json.dumps(metrics,ensure_ascii=False))
+
+          # ---------- merged observation series ----------
+          # Keep true CMA daily archive whenever available; use q-weather only after CMA mirror ends.
+          comb=cma_df[['date','tmean_c','tmax_c','tmin_c','prcp_mm','source']].copy()
+          supplement=qdf[qdf.date>=pd.Timestamp('2015-03-01')][['date','tmean_c','tmax_c','tmin_c','prcp_mm','source']]
+          comb=pd.concat([comb,supplement],ignore_index=True).sort_values('date').drop_duplicates('date',keep='first')
+          comb=comb[(comb.date>=pd.Timestamp('1991-01-01'))&(comb.date<=pd.Timestamp('2020-12-31'))]
+          comb['year']=comb.date.dt.year; comb['mmdd']=comb.date.dt.strftime('%m-%d')
+          comb.to_csv(OUT/'suzhou_58349_1991_2020_daily_combined.csv',index=False,encoding='utf-8-sig')
+
+          def q10(s): return s.quantile(.1)
+          def q90(s): return s.quantile(.9)
+          g=comb.groupby('mmdd')
+          agg=g.agg(n_tmean=('tmean_c','count'),mean_tmean_c=('tmean_c','mean'),p10_tmean_c=('tmean_c',q10),p90_tmean_c=('tmean_c',q90),n_tmax=('tmax_c','count'),mean_tmax_c=('tmax_c','mean'),n_tmin=('tmin_c','count'),mean_tmin_c=('tmin_c','mean'),n_prcp=('prcp_mm','count'),mean_prcp_mm=('prcp_mm','mean')).reset_index()
+          wet=g.prcp_mm.apply(lambda s: (s.dropna()>=0.1).mean()*100 if len(s.dropna()) else np.nan).rename('wet_day_pct')
+          h10=g.prcp_mm.apply(lambda s: (s.dropna()>=10).mean()*100 if len(s.dropna()) else np.nan).rename('heavy10_pct')
+          h25=g.prcp_mm.apply(lambda s: (s.dropna()>=25).mean()*100 if len(s.dropna()) else np.nan).rename('heavy25_pct')
+          agg=agg.merge(wet,on='mmdd').merge(h10,on='mmdd').merge(h25,on='mmdd')
+          cal=pd.DataFrame({'date':pd.date_range('2000-01-01','2000-12-31')}); cal['mmdd']=cal.date.dt.strftime('%m-%d')
+          agg=cal[['mmdd']].merge(agg,on='mmdd',how='left')
+          agg.to_csv(OUT/'suzhou_58349_1991_2020_mmdd_climatology.csv',index=False,encoding='utf-8-sig')
+
+          meta={'station':'58349','station_name':'Suzhou','lat':31.4147,'lon':120.5619,'period':'1991-2020','cma_mirror_coverage':[str(cma_df.date.min().date()),str(cma_df.date.max().date())],'qweather_coverage':['2015-01-01','2020-12-31'],'combined_source_break':'2015-03-01','combined_rows':int(len(comb)),'overlap_metrics':metrics,'qweather_fetch_errors':errors[:100],'nonleap_n_tmean_min':int(agg.loc[agg.mmdd!='02-29','n_tmean'].min()),'nonleap_n_tmean_max':int(agg.loc[agg.mmdd!='02-29','n_tmean'].max()),'nonleap_n_prcp_min':int(agg.loc[agg.mmdd!='02-29','n_prcp'].min()),'nonleap_n_prcp_max':int(agg.loc[agg.mmdd!='02-29','n_prcp'].max()),'feb29_n_tmean':int(agg.loc[agg.mmdd=='02-29','n_tmean'].iloc[0]),'feb29_n_prcp':int(agg.loc[agg.mmdd=='02-29','n_prcp'].iloc[0])}
+          (OUT/'metadata.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('FINAL_META',json.dumps(meta,ensure_ascii=False))
+          print('AGG_SAMPLE',agg.iloc[[0,14,31,59,181,196,212,365]].to_json(orient='records',force_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suzhou-58349-1991-2020-observation-series
+          path: out/
+          if-no-files-found: error
