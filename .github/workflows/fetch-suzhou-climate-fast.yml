@@ -1,0 +1,42 @@
+name: Extract Suzhou CMA daily climate fast
+on:
+  push:
+    branches: [climate-data-fetch]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download archive with parallel connections
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aria2
+          aria2c -x16 -s16 -k1M --file-allocation=none --max-tries=5 \
+            -o cma_v3.rar 'https://zenodo.org/records/20025511/files/SURF_CLI_CHN_MUL_DAY_V3.0.rar?download=1'
+          ls -lh cma_v3.rar
+          md5sum cma_v3.rar
+          7z l -ba cma_v3.rar > archive-list.txt
+          python - <<'PY'
+          import re
+          xs=[]
+          pat=re.compile(r'(\S*SURF_CLI_CHN_MUL_DAY-(?:TEM-12001|PRE-13011)-(?:199[1-9]|20(?:0[0-9]|1[0-9]|20))(?:0[1-9]|1[0-2])\.TXT)$',re.I)
+          for line in open('archive-list.txt',encoding='utf-8',errors='ignore'):
+              m=pat.search(line)
+              if m:xs.append(m.group(1))
+          xs=sorted(set(xs));print('SELECTED',len(xs));open('selected-files.txt','w').write('\n'.join(xs)+'\n')
+          if len(xs)<600:raise SystemExit('Too few selected files')
+          PY
+          7z x -y -oextract cma_v3.rar @selected-files.txt
+      - name: Aggregate station 58349
+        run: python tmp_cma_extract.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suzhou-58349-cma-fast
+          path: out-fast/
+          if-no-files-found: error
