@@ -12,63 +12,32 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Download and aggregate NOAA GHCN-Daily
+      - name: Resolve Suzhou station metadata
         shell: bash
         run: |
           python - <<'PY'
-          import csv, urllib.request, collections, datetime, math, statistics, json
-          url='https://noaa-ghcn-pds.s3.amazonaws.com/csv/by_station/CHM00058349.csv'
-          urllib.request.urlretrieve(url, 'station.csv')
-          bydate=collections.defaultdict(dict)
-          rejected=0
-          with open('station.csv',encoding='utf-8') as f:
-            r=csv.DictReader(f)
-            print('HEADER', r.fieldnames)
-            for row in r:
-              d=datetime.datetime.strptime(row['DATE'],'%Y%m%d').date()
-              if not (datetime.date(1991,1,1)<=d<=datetime.date(2020,12,31)): continue
-              el=row['ELEMENT']
-              if el not in ('TAVG','TMAX','TMIN','PRCP','SNOW'): continue
-              if row.get('Q_FLAG','').strip():
-                rejected += 1; continue
-              try: v=float(row['DATA_VALUE'])
+          import urllib.request, math
+          for name in ['ghcnd-stations.txt','ghcnd-inventory.txt']:
+              urllib.request.urlretrieve('https://noaa-ghcn-pds.s3.amazonaws.com/'+name, name)
+          lines=open('ghcnd-stations.txt',encoding='ascii',errors='ignore').read().splitlines()
+          print('MATCH_58349')
+          for x in lines:
+              if '58349' in x: print(x)
+          print('MATCH_SUZHOU')
+          for x in lines:
+              if 'SUZHOU' in x.upper(): print(x)
+          print('NEAREST_TO_31.4_120.6')
+          cand=[]
+          for x in lines:
+              if not x.startswith('CH'): continue
+              try:
+                  lat=float(x[12:20]); lon=float(x[21:30])
               except: continue
-              if el in ('TAVG','TMAX','TMIN'): v/=10
-              if el in ('PRCP','SNOW'): v/=10
-              bydate[d][el]=v
-          buckets=collections.defaultdict(lambda:collections.defaultdict(list))
-          for d,v in bydate.items():
-            mmdd=d.strftime('%m-%d')
-            tmean=v.get('TAVG')
-            if tmean is None and v.get('TMAX') is not None and v.get('TMIN') is not None:
-              tmean=(v['TMAX']+v['TMIN'])/2
-            vals={'tmean':tmean,'tmax':v.get('TMAX'),'tmin':v.get('TMIN'),'prcp':v.get('PRCP'),'snow':v.get('SNOW')}
-            for k,x in vals.items():
-              if x is not None: buckets[mmdd][k].append(x)
-          def q(xs,p):
-            if not xs:return None
-            xs=sorted(xs); pos=(len(xs)-1)*p; a=int(math.floor(pos)); b=int(math.ceil(pos))
-            return xs[a] if a==b else xs[a]*(b-pos)+xs[b]*(pos-a)
-          out=[]
-          cur=datetime.date(2000,1,1)
-          while cur<=datetime.date(2000,12,31):
-            mmdd=cur.strftime('%m-%d'); b=buckets[mmdd]; pr=b['prcp']; sn=b['snow']
-            rec={
-              'mmdd':mmdd,
-              'n_tmean':len(b['tmean']),'mean_tmean_c':statistics.fmean(b['tmean']) if b['tmean'] else None,
-              'p10_tmean_c':q(b['tmean'],.1),'p90_tmean_c':q(b['tmean'],.9),
-              'n_tmax':len(b['tmax']),'mean_tmax_c':statistics.fmean(b['tmax']) if b['tmax'] else None,
-              'n_tmin':len(b['tmin']),'mean_tmin_c':statistics.fmean(b['tmin']) if b['tmin'] else None,
-              'n_prcp':len(pr),'mean_prcp_mm':statistics.fmean(pr) if pr else None,
-              'wet_day_pct':sum(x>=.1 for x in pr)/len(pr)*100 if pr else None,
-              'heavy10_pct':sum(x>=10 for x in pr)/len(pr)*100 if pr else None,
-              'heavy25_pct':sum(x>=25 for x in pr)/len(pr)*100 if pr else None,
-              'n_snow':len(sn),'snow_day_pct':sum(x>0 for x in sn)/len(sn)*100 if sn else None,
-            }
-            out.append(rec); cur+=datetime.timedelta(days=1)
-          print('QC_REJECTED',rejected)
-          print('OBS_DATES',len(bydate))
-          print('BEGIN_AGG_JSON')
-          print(json.dumps(out,separators=(',',':')))
-          print('END_AGG_JSON')
+              dist=((lat-31.4)**2 + ((lon-120.6)*math.cos(math.radians(31.4)))**2)**.5
+              cand.append((dist,x))
+          for _,x in sorted(cand)[:20]: print(x)
+          print('INVENTORY_58349_OR_NEAREST_IDS')
+          ids=[x[:11] for _,x in sorted(cand)[:20]]
+          for x in open('ghcnd-inventory.txt',encoding='ascii',errors='ignore'):
+              if x[:11] in ids or '58349' in x: print(x.rstrip())
           PY
