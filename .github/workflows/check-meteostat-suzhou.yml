@@ -1,0 +1,27 @@
+name: Check Meteostat Suzhou station
+on:
+  push:
+    branches: [climate-data-fetch]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Meteostat bulk station IDs
+        shell: bash
+        run: |
+          set -u
+          for id in 58349 58358 583580 583490; do
+            echo "=== $id ==="
+            url="https://bulk.meteostat.net/v2/daily/${id}.csv.gz"
+            code=$(curl -L -sS -o "${id}.csv.gz" -w '%{http_code}' "$url" || true)
+            echo HTTP=$code size=$(stat -c%s "${id}.csv.gz" 2>/dev/null || echo 0)
+            if [ "$code" = "200" ]; then
+              gzip -dc "${id}.csv.gz" | head -3 || true
+              echo RANGE
+              gzip -dc "${id}.csv.gz" | head -1 || true
+              gzip -dc "${id}.csv.gz" | tail -1 || true
+            fi
+          done
