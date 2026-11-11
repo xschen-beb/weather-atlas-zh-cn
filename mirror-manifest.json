@@ -6,6 +6,16 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
+      "path": "assets/atlas-lite-752037aeffc7.js",
+      "bytes": 13606,
+      "sha256": "752037aeffc7cdf877e8ade042f9c8bbb452790159953bca892aee4ba6e2bfdc"
+    },
+    {
+      "path": "assets/atlas-lite-e23b2c0c69fa.css",
+      "bytes": 3802,
+      "sha256": "e23b2c0c69fac429e67a75af286516dfbca7a96ca629d3e10c6e2eee10ce570f"
+    },
+    {
       "path": "assets/climate.session.worker-b2d359a84de5.js",
       "bytes": 1469,
       "sha256": "b2d359a84de512314a5fde2a430f31d0d596b430b05f12c3b6c36b63c77831d6"
@@ -21,9 +31,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-b458d66affbd.js",
-      "bytes": 1173560,
-      "sha256": "b458d66affbd61889c8f3173f3cfc786b20dc9da2125f4f572c06bf0946cd69d"
+      "path": "assets/index-zh-CN-local-9fc196f80a90.js",
+      "bytes": 1175061,
+      "sha256": "9fc196f80a90a5025b02586589bc02d701945dc5050debd23d4858ba801c5ed3"
     },
     {
       "path": "assets/live.worker-C5u4iOje.js",
@@ -123,7 +133,7 @@
     {
       "path": "index.html",
       "bytes": 2567,
-      "sha256": "574bd4ca3441c31b8a7d280a4829c268a080bf544a3d8e64b373a14f2b859a62"
+      "sha256": "000e7855ef0763ec65e1e3f97193f4b6eedb0054b7c6dd2b2a4ed936b9943eb9"
     }
   ]
 }
