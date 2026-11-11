@@ -1,7 +1,10 @@
 {
-  "language": "zh-CN",
-  "origin": "https://weather.theojaffee.net/",
   "files": [
+    {
+      "path": ".nojekyll",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
     {
       "path": "assets/climate.session.worker-b2d359a84de5.js",
       "bytes": 1469,
@@ -18,9 +21,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-81d38cf0a116.js",
-      "bytes": 1174247,
-      "sha256": "81d38cf0a116cede2588f79ac90a8b9e67cd400c12e067acc8be4c67a3058aee"
+      "path": "assets/index-zh-CN-local-b458d66affbd.js",
+      "bytes": 1173560,
+      "sha256": "b458d66affbd61889c8f3173f3cfc786b20dc9da2125f4f572c06bf0946cd69d"
     },
     {
       "path": "assets/live.worker-C5u4iOje.js",
@@ -119,8 +122,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 2549,
-      "sha256": "9a1aecf1aefc4f5c46ebd952370c0638ebec30869d32782dbb20fdacdbf9bdf1"
+      "bytes": 2567,
+      "sha256": "574bd4ca3441c31b8a7d280a4829c268a080bf544a3d8e64b373a14f2b859a62"
     }
   ]
 }
