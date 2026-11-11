@@ -12,12 +12,6 @@ function linePath(lines) {
   return lines.map(line => line.map(([lon, lat], i) => `${i ? 'L' : 'M'}${lon},${-lat}`).join('')).join('');
 }
 
-async function json(base, path) {
-  const response = await fetch(new URL(path, base));
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
-
 function climateSession(makeWorker, base, onProgress) {
   const worker = makeWorker();
   const pending = new Map();
@@ -47,13 +41,13 @@ function climateSession(makeWorker, base, onProgress) {
   });
   return {
     get broken() { return Boolean(broken); },
-    async detail({lon, lat}, dem, crit) {
+    async detail({lon, lat}, dem, crit, vars) {
       const meta = await ready;
       if (broken) throw broken;
       return new Promise((resolve, reject) => {
         const id = ++sequence;
         pending.set(id, {resolve, reject});
-        worker.postMessage({type: 'detail', id, lon, lat, dem, crit, vars: Object.keys(meta.vars)});
+        worker.postMessage({type: 'detail', id, lon, lat, dem, crit, vars: vars ?? Object.keys(meta.vars)});
       });
     },
   };
@@ -134,6 +128,8 @@ export function startLite(atlas) {
   let selected;
   let seq = 0;
   let loading = false;
+  let supplement = false;
+  let retryAction = showDetails;
   let session;
   let demPromise;
   let weatherRequest;
@@ -148,7 +144,7 @@ export function startLite(atlas) {
     preset.append(option);
   }
   preset.addEventListener('change', showDetails);
-  retry.addEventListener('click', showDetails);
+  retry.addEventListener('click', () => { void retryAction(); });
   for (const button of modeButtons) button.addEventListener('click', () => switchMode(button.dataset.mode));
 
   function switchMode(next) {
@@ -207,7 +203,7 @@ export function startLite(atlas) {
     mapHint.textContent = '正在加载地图…';
     try {
       const [coast, boundaries] = await Promise.all([
-        json(atlas.base, 'data/coastline.json'), json(atlas.base, 'data/china-map.geojson'),
+        atlas.loadDataJson(atlas.base, 'data/coastline.json'), atlas.loadDataJson(atlas.base, 'data/china-map.geojson'),
       ]);
       const layers = [svg('path', {class: 'lite-coast', d: linePath(coast.geometry.coordinates)})];
       for (const feature of boundaries.features) {
@@ -310,7 +306,17 @@ export function startLite(atlas) {
     progress.set(v, [loaded, total]);
     if (!loading || mode !== 'climate') return;
     const bytes = [...progress.values()].reduce((sum, [n]) => sum + n, 0);
-    detailStatus.textContent = `正在下载历史气候数据… ${(bytes / 1e6).toFixed(1)} MB`;
+    detailStatus.textContent = `正在下载${supplement ? '补充气候指标' : '历史气候数据'}… ${(bytes / 1e6).toFixed(1)} MB`;
+  }
+  function renderClimate(data, elev, state) {
+    const [summary, chart, table, note] = atlas.renderDetails(data, elev, state);
+    const scroller = document.createElement('div');
+    scroller.className = 'lite-table';
+    scroller.tabIndex = 0;
+    scroller.setAttribute('role', 'region');
+    scroller.setAttribute('aria-label', '各月气候数据');
+    scroller.append(table);
+    details.replaceChildren(summary, chart, scroller, note);
   }
   async function showDetails() {
     if (!selected) return;
@@ -320,6 +326,9 @@ export function startLite(atlas) {
     weatherRequest?.abort();
     weatherRequest = live ? new AbortController() : undefined;
     loading = true;
+    supplement = false;
+    retryAction = showDetails;
+    retry.textContent = '重试';
     retry.hidden = true;
     detailStatus.textContent = live ? '正在加载当地天气…' : '正在加载历史气候数据…';
     details.setAttribute('aria-busy', 'true');
@@ -343,17 +352,42 @@ export function startLite(atlas) {
         progress.clear();
         session = climateSession(atlas.makeWorker, atlas.base, onProgress);
       }
-      const data = await session.detail(point, elev, atlas.criteria(state));
+      const criteria = atlas.criteria(state);
+      const initialVars = [...new Set(['feels', 'sun', 'precip', ...criteria.map(item => item.v).filter(v => v !== 'daylight')])];
+      const activeSession = session;
+      const data = await activeSession.detail(point, elev, criteria, initialVars);
       if (id !== seq) return;
-      const [summary, chart, table, note] = atlas.renderDetails(data, elev, state);
-      const scroller = document.createElement('div');
-      scroller.className = 'lite-table';
-      scroller.tabIndex = 0;
-      scroller.setAttribute('role', 'region');
-      scroller.setAttribute('aria-label', '各月气候数据');
-      scroller.append(table);
-      details.append(summary, chart, scroller, note);
-      detailStatus.textContent = '';
+      if (!data) {
+        detailStatus.textContent = '此处没有气候数据（远洋或南极洲）。';
+        return;
+      }
+      renderClimate(data, elev, state);
+      const loadSupplement = async () => {
+        if (id !== seq) return;
+        supplement = loading = true;
+        progress.clear();
+        retry.hidden = true;
+        details.setAttribute('aria-busy', 'true');
+        detailStatus.textContent = '正在加载补充气候指标…';
+        try {
+          const richer = await activeSession.detail(point, elev, criteria);
+          if (id !== seq) return;
+          renderClimate(richer, elev, state);
+          detailStatus.textContent = '';
+        } catch (error) {
+          if (id !== seq) return;
+          detailStatus.textContent = `补充数据加载失败：${atlas.describeError(error.message)}`;
+          retryAction = activeSession.broken ? showDetails : loadSupplement;
+          retry.textContent = '重试补充数据';
+          retry.hidden = false;
+        } finally {
+          if (id === seq) {
+            supplement = loading = false;
+            details.removeAttribute('aria-busy');
+          }
+        }
+      };
+      await loadSupplement();
     } catch (error) {
       if (id !== seq) return;
       detailStatus.textContent = `${live ? '地点天气暂不可用' : '数据加载失败'}：${atlas.describeError(error.message)}`;

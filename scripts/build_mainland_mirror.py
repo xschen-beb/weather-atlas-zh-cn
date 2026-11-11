@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 
 
@@ -18,6 +19,8 @@ function waLocalMapStyle(style) {
   delete style.glyphs;
   delete style.sources.dem;
   style.sources.omt={type:"geojson",data:{type:"FeatureCollection",features:[]}};
+  // These sources are filled by the same resilient reader as the climate data.
+  for(const id of ["coast","china-map"]) style.sources[id].data={type:"FeatureCollection",features:[]};
   style.layers=style.layers.map(layer=>{
     if(layer.id==="hillshade") return {id:"hillshade",type:"background",paint:{"background-opacity":0}};
     if(layer.source==="omt") delete layer["source-layer"];
@@ -25,6 +28,74 @@ function waLocalMapStyle(style) {
     return layer;
   });
   return style;
+}
+'''
+
+STATIC_DATA_GLUE = r'''
+const waDataNames={
+  "data/coastline.json":"海岸线","data/china-map.geojson":"中国地图边界",
+  "data/cities.json":"城市列表","data/dem.bin":"海拔数据",
+  "data/climate/meta.json":"气候数据目录","data/climate/cells.bin":"气候网格",
+  "data/climate/feels.bin":"体感温度","data/climate/sun.bin":"日照时数",
+  "data/climate/precip.bin":"降水量","data/climate/tmax.bin":"最高温度",
+  "data/climate/tmin.bin":"最低温度","data/climate/cloud.bin":"云量",
+  "data/climate/dew.bin":"露点温度","data/climate/uv.bin":"紫外线指数",
+  "data/climate/wind.bin":"风速","data/climate/snow.bin":"积雪","data/climate/sst.bin":"海温",
+};
+function waDataFailure(error) {
+  const text=String(error?.message??error??"");
+  const hit=/^Atlas data ([^:]+): ([\s\S]*)$/.exec(text);
+  return hit?`${waDataNames[hit[1]]??"气候数据"}（${waZhError(hit[2])}）`:waZhError(text);
+}
+async function waReadDem(base) {
+  const bytes=new Uint8Array(await waDataBytes(base,"data/dem.bin"));
+  if(bytes[0]!==31||bytes[1]!==139) return bytes;
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function waClimateWorker(workerUrl) {
+  const worker=new Worker(workerUrl,{type:"module"});
+  const root=new URL("../",workerUrl);
+  const directory=new URL("data/climate/",root);
+  worker.addEventListener("message",async event=>{
+    const request=event.data;
+    if(request?.type!=="wa-climate-fetch") return;
+    event.stopImmediatePropagation();
+    const reply={type:"wa-climate-bytes",fetchId:request.fetchId};
+    try {
+      const url=new URL(request.url);
+      if(url.origin!==location.origin||!url.href.startsWith(directory.href)||url.search||url.hash) {
+        throw new Error("Unsupported climate data URL");
+      }
+      const name=url.pathname.slice(directory.pathname.length);
+      if(!/^[a-z0-9]+\.(?:json|bin)$/.test(name)) throw new Error("Unsupported climate data file");
+      const body=await waDataBytes(root,`data/climate/${name}`);
+      worker.postMessage({...reply,status:200,headers:{
+        "content-type":name.endsWith(".json")?"application/json":"application/octet-stream",
+        "content-length":String(body.byteLength),
+      },body},[body]);
+    } catch(error) {
+      worker.postMessage({...reply,error:String(error?.message||error)});
+    }
+  });
+  return worker;
+}
+function waExtraClimateButton(load,render,megabytes) {
+  const button=be("button",{class:"chip",style:"margin-top:10px"},
+    `+ 查看云量、露点、紫外线、风速、积雪及海温（${megabytes.toFixed(1)} MB）`);
+  const status=be("div",{class:"desc",role:"status"});
+  status.hidden=true;
+  button.onclick=async()=>{
+    status.hidden=false;
+    status.textContent="正在加载补充气候指标…";
+    button.disabled=true;
+    try { render(await load()); }
+    catch(error) {
+      status.textContent=`补充数据加载失败：${waDataFailure(error)}`;
+      button.textContent="重试补充数据";
+    } finally { button.disabled=false; }
+  };
+  return be("div",{},button,status);
 }
 '''
 
@@ -161,6 +232,7 @@ function waStartLiteMap() {
   import(new URL("__LITE_MODULE__", import.meta.url).href).then(({startLite})=>startLite({
     base:new URL("./",location.href),
     loadCities:_v,loadElevation:gv,elevationAt:cl,nearestCity:yv,
+    loadDataJson:waDataJson,
     makeWorker:()=>waClimateWorker(new URL("climate.session.worker-b2d359a84de5.js",import.meta.url)),
     presets:vg,
     criteria:state=>Object.entries(state).map(([v,range])=>{
@@ -170,7 +242,7 @@ function waStartLiteMap() {
     renderDetails:(data,elev,state)=>[ex(data),ix(data,-1,state),lx(data),cx(data,elev)],
     loadWeather:Rv,
     renderWeather:(data)=>$v(data,Date.now(),false),
-    describeError:waZhError,
+    describeError:waDataFailure,
   })).catch(error=>{
     console.error(error);
     const notice=document.createElement("p");
@@ -288,7 +360,45 @@ def patch_forecast(app, assets, transport):
     return imports + app
 
 
-def build(output):
+def patch_data(app, assets, files, backup_revision):
+    module = write_hashed(assets, "atlas-data", "js", (ROOT / "localization" / "atlas-data.js").read_bytes())
+    table = {x["path"]: [x["bytes"], x["sha256"]] for x in files if x["path"].startswith("data/")}
+    backup = f"https://cdn.jsdelivr.net/gh/xschen-beb/weather-atlas-zh-cn@{backup_revision}/" if backup_revision else None
+    app = replace_between(app, "function waClimateWorker(workerUrl)", "const waZhMapLocale=", STATIC_DATA_GLUE)
+    app = replace_once(app, 'const I=await mv(`${N}data/dem.bin`);', 'const I=await waReadDem(N);')
+    app = replace_once(app, '(await(await fetch(`${N}data/cities.json`)).json()).rows',
+                       '(await waDataJson(N,"data/cities.json")).rows')
+    app = replace_once(app, 'const[N,I]=await Promise.all([gv(Lh),_v(Lh)]);',
+        'const[N,I,coast,china]=await Promise.all([gv(Lh),_v(Lh),waDataJson(Lh,"data/coastline.json"),'
+        'waDataJson(Lh,"data/china-map.geojson")]);qt.getSource("coast").setData(coast);qt.getSource("china-map").setData(china);')
+    app = replace_once(app, 'qc.append(zp);function Vc(N,I=!0,L=!1,A){',
+        'const waRetry=be("button",{class:"chip hidden",type:"button",style:"pointer-events:auto;margin-left:8px"},"重试");qc.append(waRetry,zp);'
+        'function Vc(N,I=!0,L=!1,A,retry){waRetry.classList.toggle("hidden",!retry);waRetry.onclick=retry??null;')
+    app = replace_once(app, 'Vc(`加载失败：${waZhError(N.message)}`,!1,!0)',
+        'Vc(`加载失败：${waDataFailure(N)}`,!1,!0,void 0,()=>location.reload())')
+    app = replace_once(app, 'this.setStatus(`气候数据暂不可用：${waZhError(I.message)}`,!1,!0);return',
+        'this.active&&this.setStatus(`气候数据暂不可用：${waDataFailure(I)}`,!1,!0,void 0,()=>location.reload());return')
+    app = replace_once(app, '.catch(j=>this.setStatus(`筛选计算失败：${waZhError(j.message)}`,!1,!0))',
+        '.catch(j=>this.active&&this.setStatus(`气候筛选暂不可用：${waDataFailure(j)}`,!1,!0,void 0,()=>this.requery()))')
+    app = replace_once(app, '),await this.ready;const[ae,oe]=',
+        ');try{await this.ready}catch(error){if(this.cardAt?.[0]===I&&this.cardAt?.[1]===L)j.querySelector(".desc")?.replaceChildren('
+        '`气候数据暂不可用：${waDataFailure(error)}`);return}const[ae,oe]=')
+    app = replace_once(app,
+        'j.append(be("button",{class:"chip",style:"margin-top:10px",onclick:()=>this.detail(I,L,fe,pe,[...Te,...we,"feels","tmax","tmin","precip","sun","cloud"]).then(De)},`+ 查看云量、露点、紫外线、风速、积雪及海温（${Fe.toFixed(1)} MB）`))',
+        'j.append(waExtraClimateButton(()=>this.detail(I,L,fe,pe,[...Te,...we,"feels","tmax","tmin","precip","sun","cloud"]),De,Fe))')
+    app = replace_once(app, 'j.querySelector(".desc")?.replaceChildren(`数据加载失败：${waZhError(Ee.message)}`)',
+        'this.cardAt?.[0]===I&&this.cardAt?.[1]===L&&j.append(be("div",{class:"desc",role:"status"},'
+        '`地点数据加载失败：${waDataFailure(Ee)}`),be("button",{class:"chip",onclick:()=>this.showCard(I,L,!1,R)},"重试地点数据"))')
+    config = (
+        f'import {{createAtlasDataReader}} from "./{module}";\n'
+        f'const {{bytes:waDataBytes,json:waDataJson}}=createAtlasDataReader({json.dumps(table)},{json.dumps(backup)});\n'
+    )
+    return config + app
+
+
+def build(output, backup_revision=None):
+    if backup_revision and not re.fullmatch(r"[a-f0-9]{40}", backup_revision):
+        raise ValueError("The backup must pin a full GitHub commit SHA")
     output = output.resolve()
     if output.exists() or output.is_relative_to(DIST):
         raise ValueError("Choose a new output directory outside dist")
@@ -320,6 +430,7 @@ def build(output):
     lite = ROOT / "localization"
     transport = write_hashed(entry.parent, "atlas-forecast", "js", (lite / "atlas-forecast.js").read_bytes())
     app = patch_forecast(app, entry.parent, transport)
+    app = patch_data(app, entry.parent, manifest["files"], backup_revision)
     css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
     lite_js = replace_once((lite / "atlas-lite.js").read_text(), "__LITE_STYLES__", css_name)
     lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())
@@ -347,4 +458,6 @@ def build(output):
 if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("output", type=Path, help="new directory for the exported site")
-    build(cli.parse_args().output)
+    cli.add_argument("--backup-revision", help="immutable public data revision for the optional CDN backup")
+    args = cli.parse_args()
+    build(args.output, args.backup_revision)

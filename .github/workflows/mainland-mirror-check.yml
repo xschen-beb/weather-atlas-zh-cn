@@ -2,7 +2,7 @@ name: Mainland mirror check
 on:
   push:
     branches: [main]
-    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'localization/atlas-forecast.js', 'scripts/build_mainland_mirror.py', 'scripts/verify_mainland_mirror.cjs', '.github/workflows/mainland-mirror-check.yml']
+    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'localization/atlas-forecast.js', 'localization/atlas-data.js', 'scripts/build_mainland_mirror.py', 'scripts/verify_mainland_mirror.cjs', '.github/workflows/mainland-mirror-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -10,12 +10,14 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ATLAS_BACKUP_REVISION: 2ee1cf292d4bba2dd539e53e160a003a3ec995f5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python3 scripts/build_mainland_mirror.py mainland-dist
+      - run: python3 scripts/build_mainland_mirror.py mainland-dist --backup-revision "$ATLAS_BACKUP_REVISION"
       - run: npm install --no-save --package-lock=false playwright@1.62.1
       - run: npx playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk

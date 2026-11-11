@@ -7,6 +7,9 @@ const { chromium } = require('playwright');
 
 const root = path.resolve(process.argv[2] || 'mainland-dist');
 const mount = '/weather-atlas-zh-cn/';
+const revision = process.env.ATLAS_BACKUP_REVISION || '';
+assert.match(revision,/^[a-f0-9]{40}$/,'Tests require the same pinned backup as the build');
+const backup = `https://cdn.jsdelivr.net/gh/xschen-beb/weather-atlas-zh-cn@${revision}/`;
 const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8',
   '.css':'text/css; charset=utf-8','.json':'application/json','.geojson':'application/geo+json'};
 const blocked = [];
@@ -36,6 +39,14 @@ async function startPage(instance, origin, viewport) {
   const page = await context.newPage();
   page.on('pageerror',error=>errors.push(error.message));
   return page;
+}
+
+async function waitDefaultClimate(page) {
+  await page.waitForFunction(()=>{
+    const climate=window.__wa?.climate;
+    const r=climate?.result;
+    return r?.mode==='days'&&r.scaleMax===365&&r.data.some((value,i)=>i%2===0&&value>0)&&!climate.inflight;
+  },undefined,{timeout:90000});
 }
 
 function pointFixture() {
@@ -81,8 +92,15 @@ async function verifyRangeFallback() {
   const executablePath = process.env.ATLAS_TEST_CHROMIUM;
   browser = await chromium.launch({headless:true,executablePath,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const page = await startPage(browser, origin, {width:1440,height:960});
+  let sunAttempts=0, demAttempts=0;
+  await page.route(origin+mount+'data/climate/sun.bin',route=>
+    ++sunAttempts===1?route.abort('connectionreset'):route.fallback());
+  await page.route(origin+mount+'data/dem.bin',route=>
+    ++demAttempts===1?route.fulfill({status:503,body:'temporarily unavailable'}):route.fallback());
   await page.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
-  await page.waitForFunction(()=>window.__wa?.climate?.meta,undefined,{timeout:90000});
+  await waitDefaultClimate(page);
+  assert.equal(sunAttempts,2,'Default climate must recover from a reset on the site');
+  assert.equal(demAttempts,2,'The basemap must recover from a transient download failure');
   await page.evaluate(()=>window.__wa.map.fitBounds([[72,1],[138,55]],{animate:false,padding:{left:360,right:24,top:65,bottom:35}}));
   await page.waitForFunction(()=>window.__wa.map.queryRenderedFeatures({layers:['china-maritime-dashes']}).length>0,undefined,{timeout:30000});
   assert.equal(await page.evaluate(()=>window.__wa.map.queryRenderedFeatures({layers:['china-region-labels']}).length),0);
@@ -103,14 +121,40 @@ async function verifyRangeFallback() {
   await fs.mkdir('mainland-evidence',{recursive:true});
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
 
+  const fallbackPage = await startPage(browser,origin,{width:1440,height:960});
+  const sun=await fs.readFile(path.join(root,'data/climate/sun.bin'));
+  const corrupt=Buffer.from(sun);
+  corrupt[0]^=1;
+  let failedSite=0, backupAttempts=0;
+  await fallbackPage.route(origin+mount+'data/climate/sun.bin',route=>{
+    failedSite++;
+    return route.abort('connectionreset');
+  });
+  await fallbackPage.route(backup+'data/climate/sun.bin',route=>route.fulfill({
+    status:200,headers:{'Access-Control-Allow-Origin':'*'},contentType:'application/octet-stream',
+    body:++backupAttempts===1?corrupt:sun,
+  }));
+  await fallbackPage.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
+  await fallbackPage.getByText(/^气候筛选暂不可用：日照时数/).waitFor({timeout:40000});
+  assert.equal(backupAttempts,1);
+  assert.equal(await fallbackPage.evaluate(()=>Boolean(window.__wa.climate.result)),false,'Reject a wrong checksum');
+  await fallbackPage.locator('#status').getByRole('button',{name:'重试',exact:true}).click();
+  await waitDefaultClimate(fallbackPage);
+  assert.equal(failedSite,4);
+  assert.equal(backupAttempts,2);
+  await fallbackPage.locator('#status').waitFor({state:'hidden'});
+
   liteBrowser = await chromium.launch({headless:true,executablePath,args:['--disable-webgl']});
   const lite = await startPage(liteBrowser, origin, {width:390,height:844});
-  let simulateUnavailable = true;
+  let cellsAttempts=0;
   await lite.route('**/data/climate/cells.bin', async route => {
-    if (!simulateUnavailable) return route.fallback();
-    simulateUnavailable = false;
+    if (++cellsAttempts!==1) return route.fallback();
     await route.fulfill({status:503,contentType:'text/plain',body:'temporarily unavailable'});
   });
+  let supplementBlocked=true;
+  const failSupplement=route=>route.fulfill({status:503,headers:{'Access-Control-Allow-Origin':'*'},body:'temporarily unavailable'});
+  await lite.route(origin+mount+'data/climate/uv.bin',route=>supplementBlocked?failSupplement(route):route.fallback());
+  await lite.route(backup+'data/climate/uv.bin',failSupplement);
   await lite.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
   assert.equal(await lite.evaluate(()=>Boolean(document.createElement('canvas').getContext('webgl2'))),false);
   await lite.getByText('轻量版 · 历史气候',{exact:true}).waitFor();
@@ -121,13 +165,17 @@ async function verifyRangeFallback() {
   await lite.getByRole('searchbox',{name:'搜索城市'}).fill('香港');
   await lite.getByRole('button',{name:/香港.*中国/}).first().click();
   await lite.getByRole('heading',{name:'香港',exact:true}).waitFor();
-  await lite.getByText('数据加载失败：服务器返回状态码 503',{exact:true}).waitFor();
-  await lite.getByRole('button',{name:'重试',exact:true}).click();
   await lite.getByRole('table').waitFor({timeout:60000});
   const months = await lite.locator('table thead th[scope="col"]').count();
   assert.equal(months,12);
+  assert.equal(cellsAttempts,2);
+  await lite.getByText(/补充数据加载失败：紫外线指数/).waitFor();
+  assert(await lite.getByRole('table').isVisible(),'A supplement failure must keep the default results');
+  supplementBlocked=false;
+  await lite.getByRole('button',{name:'重试补充数据',exact:true}).click();
   await lite.getByRole('rowheader',{name:'最高温度',exact:true}).waitFor();
   await lite.getByRole('rowheader',{name:'日照（小时）',exact:true}).waitFor();
+  await lite.getByRole('rowheader',{name:'紫外线峰值',exact:true}).waitFor();
   await lite.getByText(/基于 ERA5 2001—2025 年/).waitFor();
   await lite.screenshot({path:'mainland-evidence/lite.jpg',type:'jpeg',quality:82,fullPage:true});
 
@@ -191,6 +239,7 @@ async function verifyRangeFallback() {
   assert.deepEqual(blocked,[],'Only mocked weather services may be contacted in live mode');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
+    resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
   await fs.writeFile('mainland-evidence/report.json',JSON.stringify(report,null,2)+'\n');
   console.log('MAINLAND_MIRROR_REPORT '+JSON.stringify(report));
