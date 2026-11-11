@@ -6,14 +6,19 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "path": "assets/atlas-lite-752037aeffc7.js",
-      "bytes": 13606,
-      "sha256": "752037aeffc7cdf877e8ade042f9c8bbb452790159953bca892aee4ba6e2bfdc"
+      "path": "assets/atlas-forecast-64b93394e583.js",
+      "bytes": 6226,
+      "sha256": "64b93394e583061185bad4894789540e2af46f071b3d4901d88e0c547fa76680"
     },
     {
-      "path": "assets/atlas-lite-e23b2c0c69fa.css",
-      "bytes": 3802,
-      "sha256": "e23b2c0c69fac429e67a75af286516dfbca7a96ca629d3e10c6e2eee10ce570f"
+      "path": "assets/atlas-lite-1705ea958e33.js",
+      "bytes": 15693,
+      "sha256": "1705ea958e33adc3d4408ddbfab88a2db637d0ce166239d9a31220abc3fec21c"
+    },
+    {
+      "path": "assets/atlas-lite-c1cc7fcf8ab1.css",
+      "bytes": 3836,
+      "sha256": "c1cc7fcf8ab1804453a490bd605d603bad1dbf1b4cc018125543f4ae4b08b1b6"
     },
     {
       "path": "assets/climate.session.worker-b2d359a84de5.js",
@@ -31,14 +36,14 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-9fc196f80a90.js",
-      "bytes": 1175061,
-      "sha256": "9fc196f80a90a5025b02586589bc02d701945dc5050debd23d4858ba801c5ed3"
+      "path": "assets/index-zh-CN-local-13c44cd0a3dd.js",
+      "bytes": 1176759,
+      "sha256": "13c44cd0a3dde9c730390e248e44fff8eb7104e81d7c24ed498e25020bf668d4"
     },
     {
-      "path": "assets/live.worker-C5u4iOje.js",
-      "bytes": 11668,
-      "sha256": "6c8e6efb5e931043921f0c75aafa7a4870bdcb6e7e4b2e9dd2d10e94ef7d92e4"
+      "path": "assets/live.worker-local-6b463d148b8e.js",
+      "bytes": 11562,
+      "sha256": "6b463d148b8eb15f6788f214721511edb29c6fe96b0d8864e34ede3fa0fe20bd"
     },
     {
       "path": "assets/zh-CN.css",
@@ -133,7 +138,7 @@
     {
       "path": "index.html",
       "bytes": 2567,
-      "sha256": "000e7855ef0763ec65e1e3f97193f4b6eedb0054b7c6dd2b2a4ed936b9943eb9"
+      "sha256": "efa5b09b42d2a8aa20f5145f0b1608bd7f23d9ffdc6c2d81ccd518d866b1e28e"
     }
   ]
 }

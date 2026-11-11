@@ -10,6 +10,7 @@
 .lite-surface { background: #fff; border: 1px solid #d8e2dc; padding: 18px; border-radius: 14px; min-width: 0; }
 .lite-surface h2 { margin: 0; font-size: 20px; }
 .lite-switch { display: flex; gap: 4px; }
+.lite-modes { margin-top: 12px; }
 .lite-shell button, .lite-shell select { border: 1px solid #bdcec5; background: #fff; border-radius: 6px; color: inherit; cursor: pointer; font: inherit; padding: 6px 10px; }
 .lite-shell button[aria-pressed=true] { background: #225a47; border-color: #225a47; color: #fff; }
 .lite-shell button:focus-visible, .lite-shell input:focus-visible, .lite-shell select:focus-visible, .lite-table:focus-visible { outline: 2px solid #22775d; outline-offset: 2px; }

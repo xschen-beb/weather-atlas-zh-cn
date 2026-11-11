@@ -1,4 +1,4 @@
-// The static mirror can show the same historical point data without WebGL.
+// The static mirror can show historical and current point data without WebGL.
 const svgNS = 'http://www.w3.org/2000/svg';
 const views = {china: [70, -56, 70, 55], world: [-180, -86, 360, 172]};
 
@@ -62,7 +62,7 @@ function climateSession(makeWorker, base, onProgress) {
 export function startLite(atlas) {
   const css = document.createElement('link');
   css.rel = 'stylesheet';
-  css.href = new URL('atlas-lite-e23b2c0c69fa.css', import.meta.url).href;
+  css.href = new URL('atlas-lite-c1cc7fcf8ab1.css', import.meta.url).href;
   document.head.append(css);
   document.documentElement.classList.add('atlas-lite');
 
@@ -81,6 +81,10 @@ export function startLite(atlas) {
             <button type="button" data-view="china" aria-pressed="true">中国</button>
             <button type="button" data-view="world" aria-pressed="false">全球</button>
           </div>
+        </div>
+        <div class="lite-switch lite-modes" role="group" aria-label="查看内容">
+          <button type="button" data-mode="climate" aria-pressed="true">历史气候</button>
+          <button type="button" data-mode="live" aria-pressed="false">实时天气</button>
         </div>
         <div class="lite-search">
           <label for="lite-city">搜索城市</label>
@@ -115,6 +119,7 @@ export function startLite(atlas) {
   map.append(baseLines, cityDots, pin);
   find('.lite-map-frame').append(map);
   const viewButtons = [...app.querySelectorAll('[data-view]')];
+  const modeButtons = [...app.querySelectorAll('[data-mode]')];
   const place = find('#lite-place');
   const placeMeta = find('.lite-place-meta');
   const preset = find('.lite-preset select');
@@ -123,6 +128,7 @@ export function startLite(atlas) {
   const details = find('.lite-detail');
 
   let view = 'china';
+  let mode = 'climate';
   let mapReady = false;
   let cities = [];
   let selected;
@@ -130,6 +136,7 @@ export function startLite(atlas) {
   let loading = false;
   let session;
   let demPromise;
+  let weatherRequest;
   const progress = new Map();
   const normalize = text => text.normalize('NFKC').trim().toLowerCase();
   const coords = ({lon, lat}) => `${lat < 0 ? '南' : '北'}纬 ${Math.abs(lat).toFixed(2)}° · ${lon < 0 ? '西' : '东'}经 ${Math.abs(lon).toFixed(2)}°`;
@@ -142,6 +149,27 @@ export function startLite(atlas) {
   }
   preset.addEventListener('change', showDetails);
   retry.addEventListener('click', showDetails);
+  for (const button of modeButtons) button.addEventListener('click', () => switchMode(button.dataset.mode));
+
+  function switchMode(next) {
+    mode = next;
+    const live = mode === 'live';
+    for (const button of modeButtons) button.setAttribute('aria-pressed', String(button.dataset.mode === mode));
+    find('.lite-header span').textContent = live ? '轻量版 · 实时天气' : '轻量版 · 历史气候';
+    find('.lite-kicker').textContent = live ? '地点天气与预报' : 'ERA5 历史气候';
+    preset.parentElement.hidden = live;
+    if (selected) void showDetails();
+    else placeMeta.textContent = live ? '搜索城市或点选地图，查看当前天气和未来 24 小时预报。' : '查看各月的气温、日照、降水等数据。';
+    if (mapReady) showMapHint();
+    const url = new URL(location.href);
+    if (live) url.searchParams.set('mode', 'live');
+    else url.searchParams.delete('mode');
+    history.replaceState(null, '', url);
+  }
+  function showMapHint() {
+    mapHint.textContent = mode === 'live' ? '点击地图上的城市或任意位置，查看当地天气。' : '点击地图上的城市或任意位置，查看该地点的历史气候。';
+  }
+  if (new URL(location.href).searchParams.get('mode') === 'live') switchMode('live');
 
   function inView({lon, lat}, scope) {
     const [x, y, w, h] = views[scope];
@@ -190,7 +218,7 @@ export function startLite(atlas) {
       }
       baseLines.replaceChildren(...layers);
       mapReady = true;
-      mapHint.textContent = '点击地图上的城市或任意位置，查看该地点的历史气候。';
+      showMapHint();
     } catch (error) {
       retryResource(mapHint, `地图加载失败：${atlas.describeError(error.message)}`, loadMap);
     }
@@ -280,7 +308,7 @@ export function startLite(atlas) {
   }
   function onProgress({v, loaded, total}) {
     progress.set(v, [loaded, total]);
-    if (!loading) return;
+    if (!loading || mode !== 'climate') return;
     const bytes = [...progress.values()].reduce((sum, [n]) => sum + n, 0);
     detailStatus.textContent = `正在下载历史气候数据… ${(bytes / 1e6).toFixed(1)} MB`;
   }
@@ -288,13 +316,23 @@ export function startLite(atlas) {
     if (!selected) return;
     const point = selected;
     const id = ++seq;
-    const state = atlas.presets.find(item => item.id === preset.value).state;
+    const live = mode === 'live';
+    weatherRequest?.abort();
+    weatherRequest = live ? new AbortController() : undefined;
     loading = true;
     retry.hidden = true;
-    detailStatus.textContent = '正在加载历史气候数据…';
+    detailStatus.textContent = live ? '正在加载当地天气…' : '正在加载历史气候数据…';
     details.setAttribute('aria-busy', 'true');
     details.replaceChildren();
     try {
+      if (live) {
+        const weather = await atlas.loadWeather(point.lat, point.lon, weatherRequest.signal);
+        if (id !== seq) return;
+        details.append(...atlas.renderWeather(weather));
+        detailStatus.textContent = '';
+        return;
+      }
+      const state = atlas.presets.find(item => item.id === preset.value).state;
       let elev = point.elev;
       if (!Number.isFinite(elev)) {
         demPromise ??= atlas.loadElevation(atlas.base.href).catch(error => { demPromise = undefined; throw error; });
@@ -318,7 +356,7 @@ export function startLite(atlas) {
       detailStatus.textContent = '';
     } catch (error) {
       if (id !== seq) return;
-      detailStatus.textContent = `数据加载失败：${atlas.describeError(error.message)}`;
+      detailStatus.textContent = `${live ? '地点天气暂不可用' : '数据加载失败'}：${atlas.describeError(error.message)}`;
       retry.hidden = false;
     } finally {
       if (id === seq) {
