@@ -28,6 +28,51 @@ function waLocalMapStyle(style) {
 }
 '''
 
+# Keep the original chart, table and ERA5 worker in both modes. Load the
+# lightweight interface only on browsers that cannot start the full map.
+START_MAP = r'''
+function waStartLiteMap() {
+  import(new URL("__LITE_MODULE__", import.meta.url).href).then(({startLite})=>startLite({
+    base:new URL("./",location.href),
+    loadCities:_v,loadElevation:gv,elevationAt:cl,nearestCity:yv,
+    makeWorker:()=>waClimateWorker(new URL("climate.session.worker-b2d359a84de5.js",import.meta.url)),
+    presets:vg,
+    criteria:state=>Object.entries(state).map(([v,range])=>{
+      const [lo,hi]=px(Gc.find(option=>option.v===v),range);
+      return {v,lo,hi};
+    }),
+    renderDetails:(data,elev,state)=>[ex(data),ix(data,-1,state),lx(data),cx(data,elev)],
+    describeError:waZhError,
+  })).catch(error=>{
+    console.error(error);
+    const notice=document.createElement("p");
+    notice.setAttribute("role","alert");
+    notice.style.cssText="position:fixed;z-index:100;left:1rem;right:1rem;top:4rem;background:white;padding:1rem";
+    notice.textContent="地图暂时无法加载，请刷新后重试。";
+    document.body.append(notice);
+  });
+}
+function waHasWebGL() {
+  try {
+    const gl=document.createElement("canvas").getContext("webgl2");
+    if(!gl) return false;
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+if(new URL(location.href).searchParams.get("map")==="lite" || !waHasWebGL()) {
+  waStartLiteMap();
+} else {
+  try { waStartRichMap(); }
+  catch(error) {
+    if(!/WebGL/i.test(String(error?.message))) throw error;
+    waStartLiteMap();
+  }
+}
+'''
+
 
 def replace_once(text, old, new):
     if text.count(old) != 1:
@@ -39,6 +84,12 @@ def replace_between(text, start, end, value):
     a = text.index(start)
     b = text.index(end, a + len(start))
     return text[:a] + value + text[b:]
+
+
+def write_hashed(assets, stem, suffix, data):
+    name = f"{stem}-{hashlib.sha256(data).hexdigest()[:12]}.{suffix}"
+    (assets / name).write_bytes(data)
+    return name
 
 
 def build(output):
@@ -79,10 +130,14 @@ def build(output):
     app = replace_once(app, 'const L=()=>gn.init().catch(', 'let waLivePromise;waStartLive=()=>waLivePromise??=gn.init().catch(')
     app = replace_once(app, '?(L(),await Rp("live")):(await Rp("climate"),L())',
                        '?await Rp("live"):await Rp("climate")')
-    app = LOCAL_STYLE + app
-    encoded = app.encode()
-    local_name = f"index-zh-CN-local-{hashlib.sha256(encoded).hexdigest()[:12]}.js"
-    (entry.parent / local_name).write_bytes(encoded)
+    lite = ROOT / "localization"
+    css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
+    lite_js = replace_once((lite / "atlas-lite.js").read_text(), "__LITE_STYLES__", css_name)
+    lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())
+    boot = 'const Lh="./",Hc='
+    app = replace_once(app, boot, "function waStartRichMap(){\n" + boot) + "\n}\n"
+    app = LOCAL_STYLE + app + replace_once(START_MAP, "__LITE_MODULE__", lite_name)
+    local_name = write_hashed(entry.parent, "index-zh-CN-local", "js", app.encode())
     html = (output / "index.html").read_text()
     html = replace_once(html, entry.name, local_name)
     html = replace_once(html, '>实时天气</button>', '>实时天气（联网）</button>')

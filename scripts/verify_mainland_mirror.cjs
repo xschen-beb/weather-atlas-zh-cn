@@ -12,6 +12,7 @@ const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charse
 const blocked = [];
 const errors = [];
 let browser;
+let liteBrowser;
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -25,11 +26,8 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404).end(); }
 });
 
-(async () => {
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch({headless:true,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
-  const context = await browser.newContext({locale:'zh-CN',viewport:{width:1440,height:960},serviceWorkers:'block'});
+async function startPage(instance, origin, viewport) {
+  const context = await instance.newContext({locale:'zh-CN',viewport,serviceWorkers:'block'});
   await context.route('**/*',route=>{
     const url = route.request().url();
     if (url.startsWith(origin+mount)) return route.continue();
@@ -37,6 +35,15 @@ const server = http.createServer(async (req, res) => {
   });
   const page = await context.newPage();
   page.on('pageerror',error=>errors.push(error.message));
+  return page;
+}
+
+(async () => {
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const executablePath = process.env.ATLAS_TEST_CHROMIUM;
+  browser = await chromium.launch({headless:true,executablePath,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+  const page = await startPage(browser, origin, {width:1440,height:960});
   await page.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
   await page.waitForFunction(()=>window.__wa?.climate?.meta,undefined,{timeout:90000});
   await page.evaluate(()=>window.__wa.map.fitBounds([[72,1],[138,55]],{animate:false,padding:{left:360,right:24,top:65,bottom:35}}));
@@ -56,12 +63,42 @@ const server = http.createServer(async (req, res) => {
   await page.locator('#searchResults li').first().click();
   await page.waitForFunction(()=>document.querySelector('#card table')&&document.querySelector('#card').innerText.includes('中国'),undefined,{timeout:40000});
   assert(!(await page.locator('#card').innerText()).includes('数据加载失败'));
-  assert.deepEqual(errors,[]);
-  assert.deepEqual(blocked,[],'Historical mode must not attempt third-party requests');
   await fs.mkdir('mainland-evidence',{recursive:true});
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
-  const report={passed:true,subpath:mount,third_party_requests:blocked.length,details};
+
+  liteBrowser = await chromium.launch({headless:true,executablePath,args:['--disable-webgl']});
+  const lite = await startPage(liteBrowser, origin, {width:390,height:844});
+  let simulateUnavailable = true;
+  await lite.route('**/data/climate/meta.json', async route => {
+    if (!simulateUnavailable) return route.fallback();
+    simulateUnavailable = false;
+    await route.fulfill({status:503,contentType:'text/plain',body:'temporarily unavailable'});
+  });
+  await lite.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
+  assert.equal(await lite.evaluate(()=>Boolean(document.createElement('canvas').getContext('webgl2'))),false);
+  await lite.getByText('轻量版 · 历史气候',{exact:true}).waitFor();
+  await lite.locator('.lite-maritime-dashes').waitFor();
+  const dashes = await lite.locator('.lite-maritime-dashes').getAttribute('d');
+  assert.equal(dashes.match(/M/g).length,10,'Nine South China Sea segments and the segment east of Taiwan');
+  assert.equal(await lite.locator('.lite-map text').count(),0);
+  await lite.getByRole('searchbox',{name:'搜索城市'}).fill('香港');
+  await lite.getByRole('button',{name:/香港.*中国/}).first().click();
+  await lite.getByRole('heading',{name:'香港',exact:true}).waitFor();
+  await lite.getByText('数据加载失败：服务器返回状态码 503',{exact:true}).waitFor();
+  await lite.getByRole('button',{name:'重试',exact:true}).click();
+  await lite.getByRole('table').waitFor({timeout:60000});
+  const months = await lite.locator('table thead th[scope="col"]').count();
+  assert.equal(months,12);
+  await lite.getByRole('rowheader',{name:'最高温度',exact:true}).waitFor();
+  await lite.getByRole('rowheader',{name:'日照（小时）',exact:true}).waitFor();
+  await lite.getByText(/基于 ERA5 2001—2025 年/).waitFor();
+  await lite.screenshot({path:'mainland-evidence/lite.jpg',type:'jpeg',quality:82,fullPage:true});
+
+  assert.deepEqual(errors,[]);
+  assert.deepEqual(blocked,[],'Historical mode must not attempt third-party requests');
+  const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
+    lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503}};
   await fs.writeFile('mainland-evidence/report.json',JSON.stringify(report,null,2)+'\n');
   console.log('MAINLAND_MIRROR_REPORT '+JSON.stringify(report));
 })().catch(error=>{console.error(error);console.error(JSON.stringify({blocked,errors}));process.exitCode=1;})
-  .finally(async()=>{if(browser)await browser.close();server.close();});
+  .finally(async()=>{await Promise.all([browser?.close(),liteBrowser?.close()]);server.close();});
