@@ -69,7 +69,7 @@ async function startPage(instance, origin, viewport) {
   liteBrowser = await chromium.launch({headless:true,executablePath,args:['--disable-webgl']});
   const lite = await startPage(liteBrowser, origin, {width:390,height:844});
   let simulateUnavailable = true;
-  await lite.route('**/data/climate/meta.json', async route => {
+  await lite.route('**/data/climate/cells.bin', async route => {
     if (!simulateUnavailable) return route.fallback();
     simulateUnavailable = false;
     await route.fulfill({status:503,contentType:'text/plain',body:'temporarily unavailable'});
