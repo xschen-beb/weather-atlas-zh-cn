@@ -28,6 +28,132 @@ function waLocalMapStyle(style) {
 }
 '''
 
+CYCLE_LOOKUP = r'''
+async function Dv(now=Date.now(),horizon=72) {
+  const recent=Math.floor(now/(6*Ch))*6*Ch;
+  const checks=Array.from({length:4},(_,i)=>Cv(recent-i*6*Ch)).map(async cycle=>{
+    try {
+    const lead=Math.max(0,Math.floor((now-cycle.time)/Ch));
+    const [current,future]=await Promise.all([
+      readGfsIndex(Av(cycle,lead)+".idx"),
+      readGfsIndex(Av(cycle,Math.min(lead+horizon,120))+".idx"),
+    ]);
+      return {cycle:current&&future?cycle:null};
+    } catch(error) {
+      return {error};
+    }
+  });
+  let failure;
+  for(const check of checks) {
+    const {cycle,error}=await check;
+    if(cycle) return cycle;
+    failure??=error;
+  }
+  throw failure??new Error("No recent GFS cycle found");
+}
+'''
+
+LIVE_BOOT = r'''
+let waRequestedMode,waLivePromise;
+async function waStartLive() {
+  if(gn.waGridReady) return true;
+  if(waLivePromise) return waLivePromise;
+  gn.waGridError="";
+  waLivePromise=gn.init().then(()=>{
+    gn.waGridReady=true;
+    return true;
+  },error=>{
+    gn.cycle=null;
+    gn.waGridError=waZhError(error.message);
+    return false;
+  }).finally(()=>{waLivePromise=undefined;});
+  return waLivePromise;
+}
+async function waActivateLive() {
+  gn.waGridError="";
+  gn.waFrameError="";
+  ja.enter();
+  const ready=await waStartLive();
+  if(Zr!=="live") return;
+  if(ready) {
+    gn.activate();
+    gn.updateCities();
+  }
+  Vc("",!1);
+  ja.enter();
+}
+async function Rp(mode) {
+  if(!Jn) {
+    waRequestedMode=mode;
+    Vc("正在准备地图…");
+    return;
+  }
+  if(mode===Zr) return;
+  const previous=Zr;
+  Zr=mode;
+  document.querySelectorAll("#modes button").forEach(button=>button.setAttribute("aria-selected",String(button.dataset.mode===mode)));
+  $h();
+  if(previous==="live"){gn.deactivate();ja.exit();}
+  if(previous==="climate") Jn.exit();
+  await Ba.fadeTo(0,160);
+  if(Zr!==mode) return;
+  mx(mode);
+  gx();
+  if(mode==="live") await waActivateLive();
+  else await Jn.enter();
+}
+'''
+
+LIVE_CARD = r'''
+async showCard(lon,lat,place) {
+  this.waCardAbort?.abort();
+  const controller=new AbortController();
+  this.waCardAbort=controller;
+  const card=this.els.card;
+  const time=this.c.waGridReady?this.c.time:Date.now();
+  _n(card);
+  card.classList.remove("hidden");
+  const close=be("button",{class:"close","aria-label":"关闭",onclick:()=>{
+    controller.abort();
+    this.onCardClose();
+  }},"✕");
+  const heading=be("div",{class:"place"},"所选地点");
+  const coords=be("div",{class:"coords"},Uh(lon,lat));
+  const body=be("div",{class:"card-body"},be("div",{class:"desc",role:"status"},"正在加载当地天气…"));
+  card.append(close,heading,coords,body);
+  const stillOpen=()=>!controller.signal.aborted&&card.contains(body);
+  Promise.resolve(place).then(result=>{
+    if(!stillOpen()||!result) return;
+    heading.textContent=result.name;
+    coords.textContent=[result.detail,Uh(lon,lat)].filter(Boolean).join(" · ");
+  }).catch(()=>{});
+  try {
+    let forecast;
+    try { forecast=await Rv(lat,lon,controller.signal); }
+    catch(error) {
+      if(!stillOpen()||!this.c.waGridReady) throw error;
+      body.replaceChildren(be("div",{class:"desc",role:"status"},"正在尝试 NOAA 地点预报…"));
+      let timeout;
+      try {
+        forecast=await Promise.race([
+          this.c.gfsPoint(lon,lat,cl(this.dem,lon,lat)),
+          new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error("Request timeout")),12000);}),
+        ]);
+      } finally { clearTimeout(timeout); }
+      forecast.hours=forecast.hours.filter(hour=>Number.isFinite(hour.temp));
+      if(!forecast.hours.some(hour=>Math.abs(hour.t-time)<=90*60*1000)) throw new Error("Stale point forecast");
+    }
+    if(stillOpen()) body.replaceChildren(...$v(forecast,time,this.c.waGridReady));
+  } catch(error) {
+    if(!stillOpen()) return;
+    body.replaceChildren(
+      be("div",{class:"desc",role:"status"},`地点天气暂不可用：${waZhError(error.message)}`),
+      be("button",{class:"chip",onclick:()=>this.showCard(lon,lat,place)},"重试地点天气"),
+    );
+  }
+}}
+'''
+
 # Keep the original chart, table and ERA5 worker in both modes. Load the
 # lightweight interface only on browsers that cannot start the full map.
 START_MAP = r'''
@@ -42,6 +168,8 @@ function waStartLiteMap() {
       return {v,lo,hi};
     }),
     renderDetails:(data,elev,state)=>[ex(data),ix(data,-1,state),lx(data),cx(data,elev)],
+    loadWeather:Rv,
+    renderWeather:(data)=>$v(data,Date.now(),false),
     describeError:waZhError,
   })).catch(error=>{
     console.error(error);
@@ -92,6 +220,74 @@ def write_hashed(assets, stem, suffix, data):
     return name
 
 
+def patch_forecast(app, assets, transport):
+    imports = f'import {{fetchPointForecast as Rv, readGfsIndex}} from "./{transport}";\n'
+    worker, = assets.glob("live.worker-*.js")
+    work = worker.read_text()
+    work = replace_between(work, 'async function nt(', 'async function E(',
+        'async function nt(e,t,n=!1){const s=V(e,t,n)+".idx";let p=B.get(s);'
+        'if(!p){p=readGfsIndex(s).catch(error=>{B.delete(s);throw error});'
+        'B.set(s,p);p.then(value=>{if(!value)B.delete(s)},()=>{});}return p;}')
+    work = replace_once(work,
+        'm=await fetch(V(e,t,o),{headers:{Range:`bytes=${w}-${i}`},signal:s});'
+        'if(!m.ok)throw new Error(`GFS download failed (${m.status})`);const N=W(new Uint8Array(await m.arrayBuffer()));',
+        'm=await readGfsRange(V(e,t,o),w,i,s);const N=W(new Uint8Array(m));')
+    work = replace_between(work, 'function rt(e){', 'function ct(',
+        'function rt(e){const url=e+".idx";let value=Y.get(url);if(!value){'
+        'value=readForecastResponse(url,readForecastIndex,{timeout:5500}).catch(()=>null);Y.set(url,value);'
+        'value.then(rows=>{if(!rows)Y.delete(url)});}return value;}')
+    work = replace_once(work, 'M=await fetch(r,{headers:{Range:`bytes=${c[h][1]}-${u}`}});if(!M.ok)continue;'
+        'const[d]=W(new Uint8Array(await M.arrayBuffer()))',
+        'M=await readForecastRange(r,+c[h][1],u).catch(()=>null);if(!M)continue;const[d]=W(new Uint8Array(M))')
+    worker_imports = f'import {{readGfsIndex,readGfsRange,readForecastIndex,readForecastRange,readForecastResponse}} from "./{transport}";\n'
+    worker_name = write_hashed(assets, "live.worker-local", "js", (worker_imports + work).encode())
+    app = replace_once(app, worker.name, worker_name)
+    worker.unlink()
+
+    app = replace_between(app, 'async function mg(', 'const zv=', CYCLE_LOOKUP)
+    app = replace_between(app, 'async function Rv(', 'function Og(', '')
+    app = replace_once(app, 'this.pending.set(j,ae=>ae.error?ee(new Error(ae.error)):c(ae)),P.postMessage({id:j,cycle:I,fh:L,v:A,hrrr:R})',
+        'const timer=setTimeout(()=>{this.pending.delete(j);ee(new Error("GFS worker timeout"));},45000);'
+        'this.pending.set(j,ae=>{clearTimeout(timer);ae.error?ee(new Error(ae.error)):c(ae)});'
+        'try{P.postMessage({id:j,cycle:I,fh:L,v:A,hrrr:R})}catch(error){clearTimeout(timer);this.pending.delete(j);ee(error)}')
+    app = replace_once(app, 'this.layer=jh.find(L=>L.id===I),this.shown={a:"",b:"",alt:""},this.show(this.time,!0)',
+        'this.layer=jh.find(L=>L.id===I),this.shown={a:"",b:"",alt:""},this.active&&this.show(this.time,!0)')
+    app = replace_once(app, 'exit(){this.stop()}refreshUnits()', 'exit(){this.stop();this.waCardAbort?.abort()}refreshUnits()')
+    app = replace_once(app, 'R?\x60起报时间：', 'this.c.waGridReady&&R?\x60起报时间：')
+    app = replace_once(app, ':"正在加载…",be("br"),"点击地图任意地点查看当地预报。"))}',
+        ':this.c.waGridError?"全球图层暂不可用："+this.c.waGridError:"正在加载全球图层…",'
+        'be("br"),"点击地图或搜索城市可单独查看当地天气。",'
+        'this.c.waFrameError?be("div",{},this.c.waFrameError):null,'
+        'this.c.waGridError||this.c.waFrameError?be("button",{class:"chip",onclick:()=>this.c.waRetryGrid()},"重试全球图层"):null))}')
+    app = replace_once(app, 'renderLegend(){const I=this.c.layer;', 'renderLegend(){if(!this.c.waGridReady){_n(this.els.legend);return}const I=this.c.layer;')
+    app = replace_once(app, 'if(!L.cycle)return;const A=Math.round', 'if(!L.waGridReady||!L.cycle)return;const A=Math.round')
+    app = replace_between(app, 'async showCard(I,L,A){const R=this.els.card,j=++this.cardToken', 'const Vg=36e5;', LIVE_CARD)
+    app = replace_once(app, 'function $v(N,I){', 'function $v(N,I,gridSource){')
+    app = replace_once(app, 'A<0&&(A=0);const R=N.hours[A],j=Math.abs(I-Date.now())<45*6e4,P=',
+        'A<0&&(A=N.hours.length-1);const j=Math.abs(I-Date.now())<45*6e4,R=j&&N.current?N.current:N.hours[A],P=')
+    app = replace_once(app, 'j?"现在":ul(R.t)))),be("h3",{},"未来 24 小时")',
+        '`数据时刻：${Dh(R.t,L,{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}`))),'
+        'be("h3",{},"未来 24 小时")')
+    app = replace_once(app, 'Ht("rate",R.precip??0);return[', 'Number.isFinite(R.precip)?Ht("rate",R.precip):"—";return[')
+    app = replace_once(app, '地点预报：Open-Meteo（按地点自动选择预报模式）', '地点天气：Open-Meteo（模式估计）')
+    app = replace_once(app, '。地图预报：NOAA GFS。`', '。${gridSource?"地图预报：NOAA GFS。":""}`')
+    app = replace_once(app, 'if(/abort|cancel/i.test(text))', 'if(/timeout/i.test(text))return"请求超时，请重试";'
+        'if(/stale point forecast/i.test(text))return"没有足够新的地点天气数据";if(/abort|cancel/i.test(text))')
+
+    # Queue clicks made before the coast, elevation and cities have loaded.
+    # Point cards work as soon as the map is ready, regardless of grid status.
+    app = replace_once(app, 'Jn,Zg=()=>{};const Wg=new Promise(N=>Zg=N);', 'Jn;')
+    app = replace_between(app, 'async function Rp(N){', 'function gx(){', LIVE_BOOT)
+    app = replace_once(app, 'gn.onStatus=(A,R)=>{Zr==="live"&&Vc(A,R,!R&&!!A)},',
+        'gn.waRetryGrid=waActivateLive,gn.onStatus=(A,R)=>{if(Zr!=="live")return;'
+        'if(!R&&(gn.waFrameError||A)&&gn.waGridReady){gn.waFrameError=A;ja.renderPanel();}Vc(A,R,!R&&!!A)},')
+    app = replace_once(app, 'Jn.liveReady=Wg,', 'Jn.liveReady={then:(yes,no)=>waStartLive().then(ready=>{'
+        'if(!ready)throw new Error("No recent GFS cycle found");}).then(yes,no)},')
+    app = replace_between(app, 'const L=()=>gn.init().catch(', '}catch(N){console.error(N),Vc(`加载失败：',
+        'await Rp(waRequestedMode??(new URL(location.href).searchParams.get("mode")==="live"?"live":"climate"))')
+    return imports + app
+
+
 def build(output):
     output = output.resolve()
     if output.exists() or output.is_relative_to(DIST):
@@ -121,16 +317,9 @@ def build(output):
     app = replace_between(app, 'function mx(N){', 'async function Rp(N){',
         'function mx(N){if(qt.getLayer("water"))qt.setPaintProperty("water","fill-opacity",N==="live"?.18:.995)}')
 
-    # Initialize the online forecast only when the visitor requests it.
-    app = replace_once(app, 'const Wg=new Promise(N=>Zg=N);',
-                       'let waStartLive=()=>Promise.resolve();const Wg=new Promise(N=>Zg=N);')
-    app = replace_once(app, 'async function Rp(N){if(N===Zr)return;',
-                       'async function Rp(N){if(N==="live")waStartLive();if(N===Zr)return;')
-    app = replace_once(app, 'Jn.liveReady=Wg,', 'Jn.liveReady={then:(yes,no)=>waStartLive().then(yes,no)},')
-    app = replace_once(app, 'const L=()=>gn.init().catch(', 'let waLivePromise;waStartLive=()=>waLivePromise??=gn.init().catch(')
-    app = replace_once(app, '?(L(),await Rp("live")):(await Rp("climate"),L())',
-                       '?await Rp("live"):await Rp("climate")')
     lite = ROOT / "localization"
+    transport = write_hashed(entry.parent, "atlas-forecast", "js", (lite / "atlas-forecast.js").read_bytes())
+    app = patch_forecast(app, entry.parent, transport)
     css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
     lite_js = replace_once((lite / "atlas-lite.js").read_text(), "__LITE_STYLES__", css_name)
     lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())

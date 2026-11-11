@@ -1,4 +1,4 @@
-// Verify the static mirror as a project site with external requests disabled.
+// Verify the project site offline and exercise the live sources with fixtures.
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const http = require('node:http');
@@ -38,7 +38,44 @@ async function startPage(instance, origin, viewport) {
   return page;
 }
 
+function pointFixture() {
+  const current = Math.floor(Date.now() / 900000) * 900;
+  const firstHour = Math.floor(current / 3600) * 3600 - 7200;
+  const time = Array.from({length:36},(_,i)=>firstHour+3600*i);
+  return {timezone:'Asia/Shanghai',current:{time:current,temperature_2m:23.4,weather_code:0,is_day:1},
+    hourly:{time,temperature_2m:time.map(()=>18.1),weather_code:time.map(()=>0),is_day:time.map(()=>1)}};
+}
+
+async function verifyRangeFallback() {
+  const {readGfsRange,readForecastResponse}=await import('../localization/atlas-forecast.js');
+  const realFetch=global.fetch;
+  const requested=[];
+  try {
+    global.fetch=async (url,init)=>{
+      requested.push([url,init.headers.Range]);
+      if (requested.length===1) return new Response('not a partial response',{status:200});
+      return new Response(new Uint8Array([71,82,73,66]),{status:206,headers:{'content-length':'4'}});
+    };
+    const bytes=await readGfsRange('https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.test/file',200,203);
+    assert.equal(Buffer.from(bytes).toString('ascii'),'GRIB');
+    assert.equal(requested.length,2);
+    assert.match(requested[1][0],/\.s3\.us-east-1\.amazonaws\.com/);
+    assert(requested.every(row=>row[1]==='bytes=200-203'));
+
+    global.fetch=async (_,init)=>new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([71]));
+        init.signal.addEventListener('abort',()=>controller.error(init.signal.reason),{once:true});
+      },
+    }));
+    await assert.rejects(readForecastResponse('https://example.invalid',r=>r.text(),{timeout:30}),/timeout/i);
+  } finally {
+    global.fetch=realFetch;
+  }
+}
+
 (async () => {
+  await verifyRangeFallback();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const executablePath = process.env.ATLAS_TEST_CHROMIUM;
@@ -94,10 +131,67 @@ async function startPage(instance, origin, viewport) {
   await lite.getByText(/基于 ERA5 2001—2025 年/).waitFor();
   await lite.screenshot({path:'mainland-evidence/lite.jpg',type:'jpeg',quality:82,fullPage:true});
 
+  let liteForecastAttempts=0;
+  await lite.route('https://api.open-meteo.com/v1/forecast?**', async route => {
+    liteForecastAttempts++;
+    const headers={'Access-Control-Allow-Origin':'*'};
+    if (liteForecastAttempts===1) return route.fulfill({status:503,headers,body:'temporarily unavailable'});
+    return route.fulfill({status:200,headers,json:pointFixture()});
+  });
+  await lite.getByRole('button',{name:'实时天气',exact:true}).click();
+  await lite.getByText('地点天气暂不可用：服务器返回状态码 503',{exact:true}).waitFor();
+  await lite.getByRole('button',{name:'重试',exact:true}).click();
+  await lite.getByText(/数据时刻：/).waitFor();
+  await lite.getByText(/地点天气：Open-Meteo（模式估计）/).waitFor();
+  assert.match(await lite.locator('.now .big').innerText(),/^23/);
+
+  // Reproduce a click before the local elevation file has loaded. Hold the
+  // global index requests until we have verified the independent point card.
+  const live=await startPage(browser,origin,{width:1440,height:960});
+  let releaseTerrain, releaseGrid, sawTerrain;
+  const terrain=new Promise(resolve=>{releaseTerrain=resolve;});
+  const grid=new Promise(resolve=>{releaseGrid=resolve;});
+  const terrainRequested=new Promise(resolve=>{sawTerrain=resolve;});
+  let gridRequests=0;
+  await live.route('**/data/dem.bin',async route=>{sawTerrain();await terrain;await route.fallback();});
+  await live.route(/^https:\/\/noaa-gfs-bdp-pds\.s3(?:\.us-east-1)?\.amazonaws\.com\//, async route=>{
+    gridRequests++;
+    await grid;
+    return route.fulfill({status:503,headers:{'Access-Control-Allow-Origin':'*'},body:'temporarily unavailable'});
+  });
+  await live.route('https://api.open-meteo.com/v1/forecast?**',route=>
+    route.fulfill({status:200,headers:{'Access-Control-Allow-Origin':'*'},json:pointFixture()}));
+  try {
+    await live.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
+    await Promise.race([terrainRequested,live.getByText('正在加载地形…',{exact:true}).waitFor({timeout:20000})]);
+    await live.getByRole('tab',{name:'实时天气（联网）',exact:true}).click();
+    await live.getByText('正在准备地图…',{exact:true}).waitFor();
+    releaseTerrain();
+    await live.getByText('正在加载全球图层…',{exact:false}).first().waitFor();
+    await live.locator('#search').fill('北京');
+    await live.locator('#searchResults li').first().click();
+    await live.locator('#card').getByText(/数据时刻：/).waitFor();
+    assert.match(await live.locator('#card .now .big').innerText(),/^23/);
+    assert(gridRequests>0);
+    assert.equal(await live.getByRole('button',{name:'重试全球图层',exact:true}).count(),0);
+    releaseGrid();
+    const gridRetry=live.getByRole('button',{name:'重试全球图层',exact:true});
+    await gridRetry.waitFor({timeout:15000});
+    const firstAttempts=gridRequests;
+    await gridRetry.click();
+    await gridRetry.waitFor({timeout:15000});
+    assert(gridRequests>firstAttempts,'Retry must perform a fresh grid lookup');
+    assert.match(await live.locator('#card .now .big').innerText(),/^23/);
+  } finally {
+    releaseTerrain();
+    releaseGrid();
+  }
+
   assert.deepEqual(errors,[]);
-  assert.deepEqual(blocked,[],'Historical mode must not attempt third-party requests');
+  assert.deepEqual(blocked,[],'Only mocked weather services may be contacted in live mode');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
-    lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503}};
+    lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
+    live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
   await fs.writeFile('mainland-evidence/report.json',JSON.stringify(report,null,2)+'\n');
   console.log('MAINLAND_MIRROR_REPORT '+JSON.stringify(report));
 })().catch(error=>{console.error(error);console.error(JSON.stringify({blocked,errors}));process.exitCode=1;})

@@ -2,7 +2,7 @@ name: Mainland mirror check
 on:
   push:
     branches: [main]
-    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'scripts/build_mainland_mirror.py', 'scripts/verify_mainland_mirror.cjs', '.github/workflows/mainland-mirror-check.yml']
+    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'localization/atlas-forecast.js', 'scripts/build_mainland_mirror.py', 'scripts/verify_mainland_mirror.cjs', '.github/workflows/mainland-mirror-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
