@@ -1,0 +1,26 @@
+name: Climate controls audit
+on:
+  push:
+    branches: [verify-climate-controls-20261111]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --package-lock=false playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+      - run: node scripts/audit_live_climate_controls.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: climate-controls-evidence
+          path: climate-control-evidence/
+          retention-days: 14
