@@ -17,6 +17,47 @@ SOURCES = {
     "ocean": "db626fcd5d50b096b156c78a2cc95011b39f32a61b4e47d147e3f7a77b8b2719",
     "lakes": "0803a06f9c3cb4671d89b68c48b142aad9366ba40f665245e12a913fbc61722a",
 }
+PRECISION = .0001
+MAX_SPAN = 22.5
+MAX_HOLES = 64
+MAX_VERTICES = 12_000
+
+
+def polygon_parts(geometry):
+    if geometry.is_empty:
+        return
+    if geometry.geom_type == "Polygon":
+        yield geometry
+    elif geometry.geom_type in {"MultiPolygon", "GeometryCollection"}:
+        for part in geometry.geoms:
+            yield from polygon_parts(part)
+
+
+def renderable_parts(poly):
+    """Partition large water features before the browser's tile clipping."""
+    west, south, east, north = poly.bounds
+    width, height = east - west, north - south
+    vertices = len(poly.exterior.coords) + sum(len(r.coords) for r in poly.interiors)
+    if max(width, height) <= MAX_SPAN and len(poly.interiors) <= MAX_HOLES and vertices <= MAX_VERTICES:
+        yield poly
+        return
+
+    # A single world ocean feature otherwise makes tile clipping/triangulation
+    # join thousands of land holes to tile edges, occasionally filling land.
+    # Snap the two cuts to the same coordinate lattice so adjacent pieces meet.
+    if width >= height:
+        middle = round((west + east) / 2, 4)
+        if not west < middle < east:
+            raise ValueError("Water polygon cannot be subdivided further")
+        tiles = (box(west, south, middle, north), box(middle, south, east, north))
+    else:
+        middle = round((south + north) / 2, 4)
+        if not south < middle < north:
+            raise ValueError("Water polygon cannot be subdivided further")
+        tiles = (box(west, south, east, middle), box(west, middle, east, north))
+    for tile in tiles:
+        for part in polygon_parts(poly.intersection(tile, grid_size=PRECISION)):
+            yield from renderable_parts(part)
 
 
 def encode_ring(ring):
@@ -43,11 +84,10 @@ def build(source_dir, output):
                     geom = make_valid(geom, method="structure", keep_collapsed=False)
                 if name == "ocean":
                     geom = geom.intersection(world)
-                geom = orient_polygons(set_precision(geom.simplify(.002, preserve_topology=True), .0001))
-                if not geom.is_empty:
-                    if geom.geom_type not in {"Polygon", "MultiPolygon"}:
-                        raise ValueError(f"Unexpected water geometry: {geom.geom_type}")
-                    for poly in geom.geoms if geom.geom_type == "MultiPolygon" else (geom,):
+                geom = set_precision(geom.simplify(.002, preserve_topology=True), PRECISION)
+                for part in polygon_parts(geom):
+                    for poly in renderable_parts(part):
+                        poly = orient_polygons(poly)
                         polygons.append([encode_ring(poly.exterior), *(encode_ring(ring) for ring in poly.interiors)])
     data = json.dumps(polygons, separators=(",", ":")).encode()
     output.write_bytes(gzip.compress(data, mtime=0))

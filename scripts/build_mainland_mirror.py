@@ -32,6 +32,8 @@ function waLocalMapStyle(style) {
       layer.source="water-mask";
       delete layer.filter;
       delete layer["source-layer"];
+      // This fill is a mask. Stroked antialiasing would expose internal seams.
+      layer.paint["fill-antialias"]=false;
     }
     if(layer.source==="omt") delete layer["source-layer"];
     if(layer.id==="coastline-ne") delete layer.maxzoom;
@@ -66,7 +68,7 @@ async function waReadPacked(base,path) {
 }
 async function waLoadWater(map,base) {
   try {
-    const bytes=await waReadPacked(base,"data/water-mask.json.gz");
+    const bytes=await waReadPacked(base,"data/water-mask-v2.json.gz");
     const polygons=JSON.parse(new TextDecoder().decode(bytes));
     const features=polygons.map(polygon=>({type:"Feature",properties:{},geometry:{type:"Polygon",
       coordinates:polygon.map(deltas=>{
@@ -452,7 +454,7 @@ def build(output, backup_revision=None):
         shutil.copyfile(src, dst)
 
     data_files = list(manifest["files"])
-    for name in ("water-mask.json.gz", "basemap-admin.json.gz", "basemap-physical.json.gz"):
+    for name in ("water-mask-v2.json.gz", "basemap-admin.json.gz", "basemap-physical.json.gz"):
         packed = (ROOT / "localization/maps" / name).read_bytes()
         path = f"data/{name}"
         (output / path).write_bytes(packed)

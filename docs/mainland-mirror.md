@@ -4,7 +4,7 @@
 
 历史气候模式随包提供地形阴影、海岸线、水域、地名和全部气候数据。默认筛选和基础地形无需访问外部地图瓦片、字体或地理编码服务。放大时，地图按需从 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) 加载更细的海拔，更新地形阴影和气候着色；两条入口都失败时，仍用站内海拔绘制。精细海拔修正只改变显示和地点估计，气候数据的时间范围和空间采样不变。
 
-水域遮罩取自 Natural Earth 的 [海洋](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-ocean/) 和 [湖泊](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-lakes/) 数据，只包含水域几何。要重建遮罩，将两个源压缩包保存为 `ne_10m_ocean.zip` 和 `ne_10m_lakes.zip`，用 `python3 scripts/build_water_mask.py <源数据目录> localization/maps/water-mask.json.gz` 生成。
+水域遮罩取自 Natural Earth 的 [海洋](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-ocean/) 和 [湖泊](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-lakes/) 数据，只包含水域几何。构建时把范围大或孔洞多的水域分成相接的小面，避免小比例尺下的浏览器瓦片裁切误盖陆地。要重建遮罩，将两个源压缩包保存为 `ne_10m_ocean.zip` 和 `ne_10m_lakes.zip`，用 `python3 scripts/build_water_mask.py <源数据目录> localization/maps/water-mask-v2.json.gz` 生成。
 
 完整版按原图的比例尺显示中文国家、省州和海洋名称、国界和省州界。中国省界与普通省级名称取自已有中国地图数据；其他区域的线和名称取自 Natural Earth，发布前剔除会与中国地图重复的要素。中国轮廓和南海线段仍由原有图层绘制。放大后异步加载 [OpenFreeMap](https://openfreemap.org/) 的高速、干线和主路、河流及细水岸。详细瓦片只绘制交通和水系；瓦片不可用时，显示随站点发布的 Natural Earth 主干路和主要河流。气候筛选独立于这些图层。实时预报仅在选择联网功能时请求预报服务。
 

@@ -136,16 +136,21 @@ async function verifyBasemap(page, origin, instance) {
   return {localFallback:true,blockedMetadataDidNotGateClimate:true,rendered};
 }
 
-async function mapFrame(page, patch, lonLat) {
-  const clip = await page.evaluate(async ({patch,lonLat})=>{
+async function mapFrame(page, patch, lonLat, radius=12) {
+  const clip = await page.evaluate(async ({patch,lonLat,radius})=>{
     const {map,field}=window.__wa;
     if(patch.hillshade) map.setLayoutProperty('hillshade','visibility',patch.hillshade);
+    if(patch.water) map.setLayoutProperty('water','visibility',patch.water);
     if(patch.opacity!==undefined) field.opacity=patch.opacity;
     if(patch.coarse) field.setLocalDem(null);
-    await new Promise(resolve=>{ map.once('render',resolve); map.triggerRepaint(); });
+    await new Promise(resolve=>{
+      const timer=setTimeout(resolve,1000);
+      map.once('render',()=>{ clearTimeout(timer); resolve(); });
+      map.triggerRepaint();
+    });
     const point=map.project(lonLat);
-    return {x:Math.round(point.x)-12,y:Math.round(point.y)-12,width:24,height:24};
-  },{patch,lonLat});
+    return {x:Math.round(point.x)-radius,y:Math.round(point.y)-radius,width:radius*2,height:radius*2};
+  },{patch,lonLat,radius});
   const png=(await page.screenshot({clip})).toString('base64');
   return page.evaluate(async png=>{
     const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(png), c=>c.charCodeAt(0))]));
@@ -157,6 +162,49 @@ async function mapFrame(page, patch, lonLat) {
 
 function pixelDifference(a,b) {
   return a.reduce((sum,x,i)=>sum+Math.abs(x-b[i]),0)/a.length;
+}
+
+async function verifyWaterCoverage(page) {
+  // The old world-sized polygon reported these land points as dry to feature
+  // queries, but its triangles painted them blue. Check the rendered pixels.
+  const cases = [
+    {name:'Australia overview',center:[141,-25],zoom:1.75,land:[146.6,-32.3],sea:[159.4,-37.6]},
+    {name:'Australia regional',center:[141,-25],zoom:2.3,land:[146.6,-32.3],sea:[159.4,-37.6]},
+    {name:'Japan regional',center:[132,27],zoom:2.3,land:[139.2,36.35],sea:[145.5,34.7]},
+    {name:'Australia closer',center:[141,-25],zoom:3.2,land:[146.6,-32.3],sea:[159.4,-37.6]},
+    {name:'Central America regional',center:[-89.5,14.5],zoom:4.15,land:[-89.63,14.21],sea:[-93,11.2]},
+  ];
+  const result = [];
+  await page.evaluate(()=>window.__wa.map.setLayoutProperty('city-labels','visibility','none'));
+  try {
+    for(const {name,center,zoom,land,sea} of cases) {
+      await zoomTo(page,center,zoom);
+      await page.waitForFunction(sea=>{
+        const m=window.__wa.map;
+        return m.isSourceLoaded('water-mask')&&m.queryRenderedFeatures(m.project(sea),{layers:['water']}).length>0;
+      },sea,{timeout:30000});
+      const masked=await mapFrame(page,{water:'visible',opacity:1},land,3);
+      const unmasked=await mapFrame(page,{water:'none',opacity:1},land,3);
+      const plain=await mapFrame(page,{water:'visible',opacity:0},land,3);
+      const seaPlain=await mapFrame(page,{opacity:0},sea,3);
+      const seaClimate=await mapFrame(page,{opacity:1},sea,3);
+      const waterOverLand=pixelDifference(masked,unmasked);
+      const climateOnLand=pixelDifference(masked,plain);
+      const climateAtSea=pixelDifference(seaPlain,seaClimate);
+      assert(waterOverLand<2&&climateOnLand>5&&climateAtSea<2,
+        `${name} z${zoom}: water over land ${waterOverLand}, land climate ${climateOnLand}, sea climate ${climateAtSea}`);
+      result.push({name,zoom,waterOverLand,climateOnLand,climateAtSea});
+    }
+  } finally {
+    await page.evaluate(()=>{
+      const {map,field}=window.__wa;
+      map.setLayoutProperty('city-labels','visibility','visible');
+      map.setLayoutProperty('water','visibility','visible');
+      field.opacity=1;
+      map.triggerRepaint();
+    });
+  }
+  return result;
 }
 
 async function verifyTerrain(page, origin, instance) {
@@ -299,6 +347,7 @@ async function verifyRangeFallback() {
   await fs.mkdir('mainland-evidence',{recursive:true});
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
   await page.locator('#card').getByRole('button',{name:'关闭',exact:true}).click();
+  const waterCoverage=await verifyWaterCoverage(page);
   const terrainRender=await verifyTerrain(page,origin,browser);
   const basemapRender=await verifyBasemap(page,origin,browser);
 
@@ -433,7 +482,7 @@ async function verifyRangeFallback() {
   assert.deepEqual(startupAssetRequests,[],'Full and lightweight historical mode must boot without any HTTP JS or CSS asset');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
-    terrain:terrainRender,basemap:basemapRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
+    waterCoverage,terrain:terrainRender,basemap:basemapRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
       compatibility_entry:true,climate:startupClimate},
     resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
