@@ -15,10 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 
 LOCAL_STYLE = r'''
+const waBasemap=createAtlasBasemap();
 function waLocalMapStyle(style) {
   // Keep the local administrative geometry, and source only physical data
   // for the terrain and water overlays.
   delete style.glyphs;
+  waBasemap.style(style);
   style.sources.omt={type:"geojson",data:{type:"FeatureCollection",features:[]}};
   style.sources.dem.attribution+=' · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">地形数据署名</a>';
   style.sources["water-mask"]={type:"geojson",data:{type:"FeatureCollection",features:[]},maxzoom:12,tolerance:.25};
@@ -42,6 +44,7 @@ function waLocalMapStyle(style) {
 STATIC_DATA_GLUE = r'''
 const waDataNames={
   "data/coastline.json":"海岸线","data/china-map.geojson":"中国地图边界",
+  "data/basemap-admin.json.gz":"行政区与地名","data/basemap-physical.json.gz":"主干路与河流",
   "data/cities.json":"城市列表","data/dem.bin":"海拔数据",
   "data/climate/meta.json":"气候数据目录","data/climate/cells.bin":"气候网格",
   "data/climate/feels.bin":"体感温度","data/climate/sun.bin":"日照时数",
@@ -448,12 +451,12 @@ def build(output, backup_revision=None):
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
 
-    mask = ROOT / "localization/maps/water-mask.json.gz"
-    mask_data = mask.read_bytes()
-    mask_path = f"data/{mask.name}"
-    (output / mask_path).write_bytes(mask_data)
-    data_files = [*manifest["files"], {"path": mask_path, "bytes": len(mask_data),
-                                        "sha256": hashlib.sha256(mask_data).hexdigest()}]
+    data_files = list(manifest["files"])
+    for name in ("water-mask.json.gz", "basemap-admin.json.gz", "basemap-physical.json.gz"):
+        packed = (ROOT / "localization/maps" / name).read_bytes()
+        path = f"data/{name}"
+        (output / path).write_bytes(packed)
+        data_files.append({"path": path, "bytes": len(packed), "sha256": hashlib.sha256(packed).hexdigest()})
 
     entry, = (output / "assets").glob("index-zh-CN-*.js")
     app = entry.read_text()
@@ -467,7 +470,10 @@ def build(output, backup_revision=None):
                        'waTerrain.setBase(La),qt.setLayoutProperty("hillshade","visibility","visible"),'
                        'waTerrain.follow(qt,A=>Ba.setLocalDem(A)),')
     app = replace_once(app, 'Vc("正在加载地形…");const[N,I]',
-                       'Vc("正在加载地形…");void waLoadWater(qt,Lh);const[N,I]')
+                       'Vc("正在加载地形…");void waLoadWater(qt,Lh);'
+                       'waBasemap.start(qt,handler=>Yc.addProtocol("atlasvector",handler),'
+                       'async path=>JSON.parse(new TextDecoder().decode(await waReadPacked(Lh,path))));const[N,I]')
+    app = replace_once(app, 'function mx(N){', 'function mx(N){waBasemap.setWeatherMode(qt,N);')
     app = replace_once(app, 'I.data,1,this.tex.ldem', 'I.data,2,this.tex.ldem')
     app = replace_once(app, 'vec2 t = (v_merc - u_ldemExt.xy) / (u_ldemExt.zw - u_ldemExt.xy);',
                        'vec2 local = v_merc;\n  local.x += floor((u_ldemExt.x + u_ldemExt.z) * 0.5 - local.x + 0.5);\n'
@@ -479,6 +485,7 @@ def build(output, backup_revision=None):
     lite = ROOT / "localization"
     transport = write_hashed(entry.parent, "atlas-forecast", "js", (lite / "atlas-forecast.js").read_bytes())
     terrain = write_hashed(entry.parent, "atlas-terrain", "js", (lite / "atlas-terrain.js").read_bytes())
+    basemap = write_hashed(entry.parent, "atlas-basemap", "js", (lite / "atlas-basemap.js").read_bytes())
     app = patch_forecast(app, entry.parent, transport)
     app = patch_data(app, entry.parent, data_files, backup_revision)
     css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
@@ -486,7 +493,9 @@ def build(output, backup_revision=None):
     lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())
     boot = 'const Lh="./",Hc='
     app = replace_once(app, boot, "function waStartRichMap(){\n" + boot) + "\n}\n"
-    app = f'import {{createAtlasTerrain}} from "./{terrain}";\n' + LOCAL_STYLE + app + replace_once(START_MAP, "__LITE_MODULE__", lite_name)
+    app = (f'import {{createAtlasTerrain}} from "./{terrain}";\n'
+           f'import {{createAtlasBasemap}} from "./{basemap}";\n' + LOCAL_STYLE + app
+           + replace_once(START_MAP, "__LITE_MODULE__", lite_name))
     local_name = write_hashed(entry.parent, "index-zh-CN-local", "js", app.encode())
     html = (output / "index.html").read_text()
     html = replace_once(html, entry.name, local_name)

@@ -16,6 +16,8 @@ const blocked = [];
 const errors = [];
 const startupAssetRequests = [];
 const terrainUrl = /^https:\/\/elevation-tiles-prod\.s3(?:\.us-east-1)?\.amazonaws\.com\/terrarium\//;
+const basemapUrl = /^https:\/\/tiles\.openfreemap\.org\/planet(?:\/|$)/;
+let basemapAttempts = 0;
 let browser;
 let liteBrowser;
 const server = http.createServer(async (req, res) => {
@@ -37,6 +39,7 @@ async function startPage(instance, origin, viewport) {
     const url = route.request().url();
     if (url.startsWith(origin+mount)) return route.continue();
     if (terrainUrl.test(url)) return route.abort();
+    if (basemapUrl.test(url)) { basemapAttempts++; return route.abort(); }
     blocked.push(url); return route.abort();
   });
   const page = await context.newPage();
@@ -62,6 +65,75 @@ async function denyStartupAssets(page, origin) {
 
 async function zoomTo(page, center, zoom) {
   await page.evaluate(({center,zoom})=>window.__wa.map.jumpTo({center,zoom}),{center,zoom});
+}
+
+async function mapFeatures(page, ids) {
+  return page.waitForFunction(ids=>{
+    const m=window.__wa?.map;
+    return ids.every(id=>m?.getLayer(id)&&m.queryRenderedFeatures({layers:[id]}).length>0);
+  },ids,{timeout:45000});
+}
+
+async function verifyBasemap(page, origin, instance) {
+  await zoomTo(page,[122,34],4);
+  await mapFeatures(page,['china-outline','boundary-country','boundary-state','place-country','place-state']);
+  const names=await page.evaluate(()=>{
+    const m=window.__wa.map;
+    return Object.fromEntries(['place-country','place-state','china-region-labels'].map(id=>[id,
+      m.queryRenderedFeatures({layers:[id]}).map(f=>f.properties.name)]));
+  });
+  assert(names['place-country'].some(name=>['中国','蒙古','韩国','日本','朝鲜'].includes(name)));
+  assert(names['place-state'].some(name=>['内蒙古自治区','辽宁省','山东省','陕西省','江西省','浙江省','广东省','福建省'].includes(name)));
+  const hidden=/^(?:中国)?(?:台湾(?:省)?|臺灣(?:省)?|香港(?:特别行政区)?|澳门(?:特别行政区)?|Taiwan|Hong Kong|Macau|Macao)$/i;
+  assert(![...names['place-country'],...names['place-state'],...names['china-region-labels']].some(name=>hidden.test(name)));
+
+  await zoomTo(page,[113.9,22.5],7);
+  await mapFeatures(page,['roads','waterway']);
+  assert(basemapAttempts>0,'The local fallback must draw when the optional basemap is blocked');
+  await page.context().close();
+
+  const online=await startPage(instance,origin,{width:1280,height:860});
+  await denyStartupAssets(online,origin);
+  // Genuine OpenFreeMap Shenzhen tile, served at the fetch boundary. Holding
+  // TileJSON proves the default result does not depend on the optional source.
+  const tile=(await fs.readFile(path.join(__dirname,'fixtures/basemap-shenzhen.pbf'))).toString('base64');
+  await online.addInitScript(tile=>{
+    const fetchActual=globalThis.fetch.bind(globalThis);
+    const bytes=Uint8Array.from(atob(tile),c=>c.charCodeAt(0));
+    const wait=new Promise(resolve=>{window.releaseBasemap=resolve;});
+    globalThis.fetch=async (input,init)=>{
+      const url=String(input);
+      if(url==='https://tiles.openfreemap.org/planet') {
+        await wait;
+        return Response.json({maxzoom:14,tiles:['https://tiles.openfreemap.org/planet/atlas_fixture/{z}/{x}/{y}.pbf'],
+          vector_layers:['transportation','waterway','water','place','boundary'].map(id=>({id}))});
+      }
+      if(url.startsWith('https://tiles.openfreemap.org/planet/atlas_fixture/')) {
+        return new Response(url.endsWith('/10/836/446.pbf')?bytes:new Uint8Array(),{
+          headers:{'content-type':'application/vnd.mapbox-vector-tile'},
+        });
+      }
+      return fetchActual(input,init);
+    };
+  },tile);
+  await online.goto(origin+mount+'#map=10/22.55/114.05',{waitUntil:'domcontentloaded',timeout:30000});
+  await waitDefaultClimate(online);
+  assert.equal(await online.evaluate(()=>Boolean(window.__wa.map.getSource('atlas-vector-details'))),false);
+  await online.evaluate(()=>{window.releaseBasemap();});
+  const ids=['atlas-detail-roads','atlas-detail-waterway','atlas-detail-water','atlas-detail-coastline'];
+  await mapFeatures(online,ids);
+  const rendered=await online.evaluate(ids=>{
+    const map=window.__wa.map;
+    const allowed=map.getStyle().layers.filter(l=>l.source==='atlas-vector-details').map(l=>l['source-layer']);
+    const features=Object.fromEntries(ids.map(id=>[id,map.queryRenderedFeatures({layers:[id]}).length]));
+    const roadClasses=[...new Set(map.queryRenderedFeatures({layers:[ids[0]]}).map(f=>f.properties.class))];
+    return {allowed,features,roadClasses};
+  },ids);
+  assert(rendered.allowed.every(id=>['transportation','waterway','water'].includes(id)));
+  assert(rendered.roadClasses.every(kind=>['motorway','trunk','primary'].includes(kind)));
+  await online.screenshot({path:'mainland-evidence/basemap.jpg',type:'jpeg',quality:82});
+  await online.context().close();
+  return {localFallback:true,blockedMetadataDidNotGateClimate:true,rendered};
 }
 
 async function mapFrame(page, patch, lonLat) {
@@ -228,6 +300,7 @@ async function verifyRangeFallback() {
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
   await page.locator('#card').getByRole('button',{name:'关闭',exact:true}).click();
   const terrainRender=await verifyTerrain(page,origin,browser);
+  const basemapRender=await verifyBasemap(page,origin,browser);
 
   const fallbackPage = await startPage(browser,origin,{width:1440,height:960});
   const index=await fs.readFile(path.join(root,'index.html'),'utf8');
@@ -260,6 +333,7 @@ async function verifyRangeFallback() {
   assert.equal(backupAttempts,2);
   await fallbackPage.locator('#status').waitFor({state:'hidden'});
   assert.equal(externalEntryLoads,1,'A decoder failure should use the same-origin compatibility entry once');
+  await fallbackPage.context().close();
 
   liteBrowser = await chromium.launch({headless:true,executablePath,args:['--disable-webgl']});
   const lite = await startPage(liteBrowser, origin, {width:390,height:844});
@@ -310,6 +384,7 @@ async function verifyRangeFallback() {
   await lite.getByText(/数据时刻：/).waitFor();
   await lite.getByText(/地点天气：Open-Meteo（模式估计）/).waitFor();
   assert.match(await lite.locator('.now .big').innerText(),/^23/);
+  await lite.context().close();
 
   // Reproduce a click before the local elevation file has loaded. Hold the
   // global index requests until we have verified the independent point card.
@@ -358,7 +433,7 @@ async function verifyRangeFallback() {
   assert.deepEqual(startupAssetRequests,[],'Full and lightweight historical mode must boot without any HTTP JS or CSS asset');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
-    terrain:terrainRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
+    terrain:terrainRender,basemap:basemapRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
       compatibility_entry:true,climate:startupClimate},
     resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};

@@ -105,6 +105,7 @@ def inline_app(app, assets, lite_name, lite_css):
     imports = [
         ("atlas-data-*.js", "createAtlasDataReader", "{createAtlasDataReader}", ["createAtlasDataReader"]),
         ("atlas-terrain-*.js", "createAtlasTerrain", "{createAtlasTerrain}", ["createAtlasTerrain"]),
+        ("atlas-basemap-*.js", "createAtlasBasemap", "{createAtlasBasemap}", ["createAtlasBasemap"]),
         ("atlas-forecast-*.js", "fetchPointForecast as Rv, readGfsIndex",
          "{fetchPointForecast:Rv,readGfsIndex}", ["fetchPointForecast", "readGfsIndex"]),
     ]

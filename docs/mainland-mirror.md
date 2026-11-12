@@ -4,7 +4,11 @@
 
 历史气候模式随包提供地形阴影、海岸线、水域、地名和全部气候数据。默认筛选和基础地形无需访问外部地图瓦片、字体或地理编码服务。放大时，地图按需从 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) 加载更细的海拔，更新地形阴影和气候着色；两条入口都失败时，仍用站内海拔绘制。精细海拔修正只改变显示和地点估计，气候数据的时间范围和空间采样不变。
 
-水域遮罩取自 Natural Earth 的 [海洋](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-ocean/) 和 [湖泊](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-lakes/) 数据，只包含水域几何。要重建遮罩，将两个源压缩包保存为 `ne_10m_ocean.zip` 和 `ne_10m_lakes.zip`，用 `python3 scripts/build_water_mask.py <源数据目录> localization/maps/water-mask.json.gz` 生成。底图保留原有中国边界，不包含街道级瓦片。实时预报仅在选择联网功能时请求预报服务。
+水域遮罩取自 Natural Earth 的 [海洋](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-ocean/) 和 [湖泊](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-lakes/) 数据，只包含水域几何。要重建遮罩，将两个源压缩包保存为 `ne_10m_ocean.zip` 和 `ne_10m_lakes.zip`，用 `python3 scripts/build_water_mask.py <源数据目录> localization/maps/water-mask.json.gz` 生成。
+
+完整版按原图的比例尺显示中文国家、省州和海洋名称、国界和省州界。中国省界与普通省级名称取自已有中国地图数据；其他区域的线和名称取自 Natural Earth，发布前剔除会与中国地图重复的要素。中国轮廓和南海线段仍由原有图层绘制。放大后异步加载 [OpenFreeMap](https://openfreemap.org/) 的高速、干线和主路、河流及细水岸。详细瓦片只绘制交通和水系；瓦片不可用时，显示随站点发布的 Natural Earth 主干路和主要河流。气候筛选独立于这些图层。实时预报仅在选择联网功能时请求预报服务。
+
+要重新生成站内底图，用 `python3 scripts/build_basemap.py <源数据目录>`。将 Natural Earth 的 `ne_10m_roads.zip`、`ne_10m_rivers_lake_centerlines.zip`、`ne_50m_admin_0_countries.zip`、`ne_10m_admin_0_boundary_lines_land.zip`、`ne_10m_admin_1_states_provinces_lines.zip`、`ne_10m_admin_1_states_provinces.zip` 分别保存为 `roads.zip`、`rivers_lake_centerlines.zip`、`countries.zip`、`country-lines.zip`、`state-lines.zip`、`state-areas.zip`。生成器核验源文件的 SHA-256，依赖 pyshp 2.3.1 和 Shapely 2.1.2。
 
 发布首页包含压缩的地图程序、样式、轻量版界面及历史气候计算程序。收到首页后，历史模式无需另行下载 JavaScript 或 CSS 文件即可启动；底图和气候数据仍按需读取。首页无法解压时，可加载本站保留的兼容入口。历史模式不会预先启动实时预报的计算程序。
 
@@ -25,3 +29,5 @@
 将 `mainland-dist/` 内的文件放到托管的发布目录，保持 `assets/` 和 `data/` 的层级。主页为 `index.html`；JavaScript 需以 JavaScript 类型提供，`.bin` 文件按原始字节提供。使用 HTTPS，并且不要将资源请求重定向到登录页。
 
 `mirror-manifest.json` 包含发布文件的 SHA256，可比对线上返回内容。浏览器核验在项目子路径挂载页面，阻断外部脚本和样式文件，检查完整版的默认筛选和轻量版的城市详情，并验证解压失败时的兼容入口。启用正式网址后仍要从中国大陆线路检查真实首页和资源；开发测试不能替代这一步。
+
+浏览器测试使用 [OpenFreeMap 深圳瓦片](https://tiles.openfreemap.org/planet/20261101_080013_pt/10/836/446.pbf)（© OpenMapTiles、© OpenStreetMap contributors，SHA-256 `234120fcda1e28ca1a084913ea8c60568d03110f6b895a9776a24b02f658d568`），检查路网、河流和水岸真实渲染，以及禁止外部瓦片时的本地回退。该固定样本只用于测试，发布站点会读取当前的瓦片目录。

@@ -2,7 +2,7 @@ name: Mainland mirror check
 on:
   push:
     branches: [main]
-    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'localization/atlas-forecast.js', 'localization/atlas-data.js', 'localization/atlas-terrain.js', 'localization/maps/water-mask.json.gz', 'scripts/build_mainland_mirror.py', 'scripts/embed_atlas_startup.py', 'scripts/verify_mainland_mirror.cjs', '.github/workflows/mainland-mirror-check.yml']
+    paths: ['dist/**', 'active-manifest.json', 'localization/atlas-lite.*', 'localization/atlas-forecast.js', 'localization/atlas-data.js', 'localization/atlas-terrain.js', 'localization/atlas-basemap.js', 'localization/maps/*.json.gz', 'scripts/build_mainland_mirror.py', 'scripts/embed_atlas_startup.py', 'scripts/verify_mainland_mirror.cjs', 'scripts/fixtures/basemap-shenzhen.pbf', '.github/workflows/mainland-mirror-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ATLAS_BACKUP_REVISION: 2ee1cf292d4bba2dd539e53e160a003a3ec995f5
+      ATLAS_BACKUP_REVISION: 9e4fa92ce04ae09d95ee61c810c834ff9179f966
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
