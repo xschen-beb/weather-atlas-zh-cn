@@ -26,6 +26,11 @@
       "sha256": "c1cc7fcf8ab1804453a490bd605d603bad1dbf1b4cc018125543f4ae4b08b1b6"
     },
     {
+      "path": "assets/atlas-terrain-a0dee1ccdf47.js",
+      "bytes": 8848,
+      "sha256": "a0dee1ccdf477585c07cdfce13af2fe752ef1d778af18f59d08a72286fa8f3cd"
+    },
+    {
       "path": "assets/climate.session.worker-b2d359a84de5.js",
       "bytes": 1469,
       "sha256": "b2d359a84de512314a5fde2a430f31d0d596b430b05f12c3b6c36b63c77831d6"
@@ -41,9 +46,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-50559d8a34ed.js",
-      "bytes": 1180884,
-      "sha256": "50559d8a34edcef2f5c9dc8b07e40d88793649b568596bfebac15d011a614565"
+      "path": "assets/index-zh-CN-local-32338de5e150.js",
+      "bytes": 1179906,
+      "sha256": "32338de5e15064c4a57f6f6c3a82a73e71059c3e0fbb6d76166a4424dcd50b8b"
     },
     {
       "path": "assets/live.worker-local-6b463d148b8e.js",
@@ -141,9 +146,14 @@
       "sha256": "8d1ca4fd7de497f1a65837ee45c711bd758945b641991e718894052264135285"
     },
     {
+      "path": "data/water-mask.json.gz",
+      "bytes": 1469053,
+      "sha256": "e4c179d7ae174f55ea477bf96ccb54125e202be31977b72b084b07008a7915dc"
+    },
+    {
       "path": "index.html",
-      "bytes": 554015,
-      "sha256": "eea6910f23c6657c3416d95e17cac8cc2c313bd3d44279bd961e3004a078ebe9"
+      "bytes": 557367,
+      "sha256": "b963bf24252e2022b5a011f9e660686e627fa8283fb24d292d514f27be5102c2"
     }
   ]
 }
