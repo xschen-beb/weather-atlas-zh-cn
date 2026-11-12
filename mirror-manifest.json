@@ -6,6 +6,11 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
+      "path": "assets/atlas-basemap-827b0b6ae18d.js",
+      "bytes": 8079,
+      "sha256": "827b0b6ae18d8e2cb22de498a8ab3b15423bd2d37d25a35a34636b79b942271e"
+    },
+    {
       "path": "assets/atlas-data-2a256355db27.js",
       "bytes": 2773,
       "sha256": "2a256355db2718591c02718d224953903152269e825f8a434c4f387710797689"
@@ -46,9 +51,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-32338de5e150.js",
-      "bytes": 1179906,
-      "sha256": "32338de5e15064c4a57f6f6c3a82a73e71059c3e0fbb6d76166a4424dcd50b8b"
+      "path": "assets/index-zh-CN-local-2abab6d80c17.js",
+      "bytes": 1180540,
+      "sha256": "2abab6d80c1702d8642d24b38febb868bb180274c5ea920bdeb6307bac1b6bc9"
     },
     {
       "path": "assets/live.worker-local-6b463d148b8e.js",
@@ -59,6 +64,16 @@
       "path": "assets/zh-CN.css",
       "bytes": 1612,
       "sha256": "10f876a85037d724317b579c4a99f60ad41836de2674fb591936efbf1b1e80c3"
+    },
+    {
+      "path": "data/basemap-admin.json.gz",
+      "bytes": 745936,
+      "sha256": "4c101a9f45c2194872b0220beca0202d848653010b59852a0b7aa1d84ba58f8d"
+    },
+    {
+      "path": "data/basemap-physical.json.gz",
+      "bytes": 1049790,
+      "sha256": "9ec37316c6f13aa41d1fb2fae74504c63ec3c76c8b1e2ed661013ea8ab1e432d"
     },
     {
       "path": "data/china-map.geojson",
@@ -152,8 +167,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 557367,
-      "sha256": "b963bf24252e2022b5a011f9e660686e627fa8283fb24d292d514f27be5102c2"
+      "bytes": 560831,
+      "sha256": "d1f80f3bab6c6fa702f380eb25a488057326a4e5b86258717738ffad158e847d"
     }
   ]
 }
