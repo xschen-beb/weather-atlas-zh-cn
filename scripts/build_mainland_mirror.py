@@ -47,7 +47,7 @@ STATIC_DATA_GLUE = r'''
 const waDataNames={
   "data/coastline.json":"海岸线","data/china-map.geojson":"中国地图边界",
   "data/basemap-admin.json.gz":"行政区与地名","data/basemap-physical.json.gz":"主干路与河流",
-  "data/cities.json":"城市列表","data/dem.bin":"海拔数据",
+  "data/cities.json":"城市列表","data/dem.bin":"海拔数据","data/water-mask-v2.json.gz":"水域",
   "data/climate/meta.json":"气候数据目录","data/climate/cells.bin":"气候网格",
   "data/climate/feels.bin":"体感温度","data/climate/sun.bin":"日照时数",
   "data/climate/precip.bin":"降水量","data/climate/tmax.bin":"最高温度",
@@ -67,22 +67,20 @@ async function waReadPacked(base,path) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 async function waLoadWater(map,base) {
-  try {
-    const bytes=await waReadPacked(base,"data/water-mask-v2.json.gz");
-    const polygons=JSON.parse(new TextDecoder().decode(bytes));
-    const features=polygons.map(polygon=>({type:"Feature",properties:{},geometry:{type:"Polygon",
-      coordinates:polygon.map(deltas=>{
-        let x=0,y=0;
-        const ring=[];
-        for(let i=0;i<deltas.length;i+=2) ring.push([(x+=deltas[i])/10000,(y+=deltas[i+1])/10000]);
-        return ring;
-      }),
-    }}));
-    map.getSource("water-mask")?.setData({type:"FeatureCollection",features});
-    // The generalized line is useful as an immediate outline. At larger scales
-    // the more accurate water polygon supplies the visible shoreline instead.
-    map.setLayerZoomRange("coastline-ne",0,5);
-  } catch { /* Keep the bundled outline if the optional mask is unavailable. */ }
+  const bytes=await waReadPacked(base,"data/water-mask-v2.json.gz");
+  const polygons=JSON.parse(new TextDecoder().decode(bytes));
+  const features=polygons.map(polygon=>({type:"Feature",properties:{},geometry:{type:"Polygon",
+    coordinates:polygon.map(deltas=>{
+      let x=0,y=0;
+      const ring=[];
+      for(let i=0;i<deltas.length;i+=2) ring.push([(x+=deltas[i])/10000,(y+=deltas[i+1])/10000]);
+      return ring;
+    }),
+  }}));
+  if(!map.getSource("water-mask")) return;
+  map.getSource("water-mask").setData({type:"FeatureCollection",features});
+  // At larger scales the more accurate water polygon supplies the shoreline.
+  map.setLayerZoomRange("coastline-ne",0,5);
 }
 function waClimateWorker(workerUrl) {
   const worker=new Worker(workerUrl,{type:"module"});
@@ -127,6 +125,88 @@ function waExtraClimateButton(load,render,megabytes) {
     } finally { button.disabled=false; }
   };
   return be("div",{},button,status);
+}
+'''
+
+RICH_MAP_LAYERS = r'''
+function waStartMapLayers() {
+  const notices=be("div",{style:"position:fixed;z-index:12;top:70px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 24px);display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none"});
+  const notice=be("div",{id:"atlas-layer-status",class:"glass hidden",role:"status",
+    style:"max-width:100%;padding:8px 12px;border-radius:12px;font-size:12px"});
+  qc.after(notices);
+  Object.assign(qc.style,{position:"static",transform:"none",maxWidth:"100%"});
+  notices.append(qc,notice);
+  let alive=true;
+  function refreshClimateCard() {
+    if(!Jn.active||!Jn.cardAt||Hc.card.classList.contains("hidden")) return;
+    const [lon,lat]=Jn.cardAt;
+    void Jn.showCard(lon,lat,true,Bg(lon,lat,Na));
+  }
+  const layers=[
+    {id:"terrain",name:"海拔",read:()=>gv(Lh),apply:dem=>{
+      Ba.setDem(dem.w,dem.h,dem.q);
+      La=Jn.dem=gn.dem=ja.dem=dem;
+      waTerrain.setBase(dem);
+      qt.setLayoutProperty("hillshade","visibility","visible");
+      waTerrain.follow(qt,detail=>Ba.setLocalDem(detail));
+      if(Zr==="live") ja.renderPanel();
+      gn.updateCities();
+      Jn.updateCities();
+      refreshClimateCard();
+    }},
+    {id:"coast",name:"海岸线",read:()=>waDataJson(Lh,"data/coastline.json"),
+      apply:data=>qt.getSource("coast").setData(data)},
+    {id:"china",name:"中国地图边界",read:()=>waDataJson(Lh,"data/china-map.geojson"),
+      apply:data=>qt.getSource("china-map").setData(data)},
+    {id:"cities",name:"城市列表",read:()=>_v(Lh),apply:cities=>{
+      // Both controllers keep a reference to this same list.
+      Na.push(...cities);
+      gn.updateCities();
+      Jn.updateCities();
+      if(document.activeElement===js&&js.value) js.dispatchEvent(new Event("input"));
+      refreshClimateCard();
+    }},
+    {id:"water",name:"水域",read:()=>waLoadWater(qt,Lh)},
+  ];
+  function updateNotice() {
+    if(!alive) return;
+    const waiting=layers.filter(layer=>layer.slow&&!layer.ready);
+    notice.classList.toggle("hidden",!waiting.length);
+    notice.replaceChildren(...waiting.map(layer=>be("div",{"data-layer":layer.id,style:"margin:3px 0"},
+      layer.error
+        ? `${layer.name}暂未加载：${waDataFailure(layer.error)}`
+        : layer.id==="terrain" ? "海拔数据下载中，着色和地形阴影将在到齐后显示。" : `正在补载${layer.name}…`,
+      layer.error?be("button",{type:"button",class:"chip",style:"pointer-events:auto;margin-left:6px",
+        onclick:()=>start(layer)},`重试${layer.name}`):null)));
+  }
+  function start(layer) {
+    if(!alive||layer.pending||layer.ready) return;
+    layer.pending=true;
+    layer.error=null;
+    layer.slow=false;
+    updateNotice();
+    const timer=setTimeout(()=>{layer.slow=true;updateNotice()},6500);
+    Promise.resolve().then(layer.read).then(value=>{
+      if(!alive) return;
+      layer.apply?.(value);
+      layer.ready=true;
+    }).catch(error=>{
+      layer.error=error;
+      layer.slow=true;
+    }).finally(()=>{
+      layer.pending=false;
+      clearTimeout(timer);
+      updateNotice();
+    });
+  }
+  const retryOnReconnect=()=>layers.filter(layer=>layer.error).forEach(start);
+  window.addEventListener("online",retryOnReconnect);
+  qt.once("remove",()=>{
+    alive=false;
+    window.removeEventListener("online",retryOnReconnect);
+    notice.remove();
+  });
+  layers.forEach(start);
 }
 '''
 
@@ -233,7 +313,7 @@ async showCard(lon,lat,place) {
     let forecast;
     try { forecast=await Rv(lat,lon,controller.signal); }
     catch(error) {
-      if(!stillOpen()||!this.c.waGridReady) throw error;
+      if(!stillOpen()||!this.c.waGridReady||!this.dem) throw error;
       body.replaceChildren(be("div",{class:"desc",role:"status"},"正在尝试 NOAA 地点预报…"));
       let timeout;
       try {
@@ -383,8 +463,8 @@ def patch_forecast(app, assets, transport):
     app = replace_once(app, 'if(/abort|cancel/i.test(text))', 'if(/timeout/i.test(text))return"请求超时，请重试";'
         'if(/stale point forecast/i.test(text))return"没有足够新的地点天气数据";if(/abort|cancel/i.test(text))')
 
-    # Queue clicks made before the coast, elevation and cities have loaded.
-    # Point cards work as soon as the map is ready, regardless of grid status.
+    # Queue clicks made before the map initializes, then open the requested
+    # mode even if geographic layers and the forecast grid are still pending.
     app = replace_once(app, 'Jn,Zg=()=>{};const Wg=new Promise(N=>Zg=N);', 'Jn;')
     app = replace_between(app, 'async function Rp(N){', 'function gx(){', LIVE_BOOT)
     app = replace_once(app, 'gn.onStatus=(A,R)=>{Zr==="live"&&Vc(A,R,!R&&!!A)},',
@@ -402,15 +482,15 @@ def patch_data(app, assets, files, backup_revision):
     table = {x["path"]: [x["bytes"], x["sha256"],
                          "low" if re.fullmatch(r"data/(?:basemap-(?:admin|physical)|water-mask-v\d+)\.json\.gz", x["path"]) else "high"]
              for x in files if x["path"].startswith("data/")}
+    for path in ("data/dem.bin", "data/coastline.json", "data/china-map.geojson", "data/cities.json",
+                 "data/water-mask-v2.json.gz"):
+        table[path].append(90000)
     backups = [f"https://{host}/gh/xschen-beb/weather-atlas-zh-cn@{backup_revision}/"
                for host in ("gcore.jsdelivr.net", "fastly.jsdelivr.net", "cdn.jsdelivr.net")] if backup_revision else []
     app = replace_between(app, "function waClimateWorker(workerUrl)", "const waZhMapLocale=", STATIC_DATA_GLUE)
     app = replace_once(app, 'const I=await mv(`${N}data/dem.bin`);', 'const I=await waReadPacked(N,"data/dem.bin");')
     app = replace_once(app, '(await(await fetch(`${N}data/cities.json`)).json()).rows',
                        '(await waDataJson(N,"data/cities.json")).rows')
-    app = replace_once(app, 'const[N,I]=await Promise.all([gv(Lh),_v(Lh)]);',
-        'const[N,I,coast,china]=await Promise.all([gv(Lh),_v(Lh),waDataJson(Lh,"data/coastline.json"),'
-        'waDataJson(Lh,"data/china-map.geojson")]);qt.getSource("coast").setData(coast);qt.getSource("china-map").setData(china);')
     app = replace_once(app, 'qc.append(zp);function Vc(N,I=!0,L=!1,A){',
         'const waRetry=be("button",{class:"chip hidden",type:"button",style:"pointer-events:auto;margin-left:8px"},"重试");qc.append(waRetry,zp);'
         'function Vc(N,I=!0,L=!1,A,retry){waRetry.classList.toggle("hidden",!retry);waRetry.onclick=retry??null;')
@@ -434,6 +514,35 @@ def patch_data(app, assets, files, backup_revision):
         f'const {{bytes:waDataBytes,json:waDataJson}}=createAtlasDataReader({json.dumps(table)},{json.dumps(backups)});\n'
     )
     return config + app
+
+
+def patch_map_startup(app):
+    app = replace_once(app, 'qt.on("load",async()=>{', RICH_MAP_LAYERS + 'qt.on("load",async()=>{')
+    app = replace_between(app, 'Vc("正在加载地形…");', 'gn=new Ov(qt,Ba,La,Na),', '')
+    app = replace_once(app, 'await Rp(waRequestedMode??',
+        'Jn.ready.catch(()=>{});waStartMapLayers();'
+        'waBasemap.start(qt,handler=>Yc.addProtocol("atlasvector",handler),'
+        'async path=>JSON.parse(new TextDecoder().decode(await waReadPacked(Lh,path))));'
+        'await Rp(waRequestedMode??')
+    # The ERA5 worker can compute its grid before the DEM arrives. Only paint
+    # the field and sample values when the true elevation is available.
+    app = replace_once(app, 'setDem(I,L,A){this.tex.dem=this.makeR8(I,L,A,this.tex.dem),',
+        'setDem(I,L,A){this.tex.dem=this.makeR8(I,L,A,this.tex.dem),this.hasDem=!0,')
+    app = replace_once(app, 'get ready(){return this.mode===0?this.hasA&&this.hasB:this.mode===1?this.hasResult:this.hasMatch}',
+        'get ready(){return !!this.hasDem&&(this.mode===0?this.hasA&&this.hasB:this.mode===1?this.hasResult:this.hasMatch)}')
+    app = replace_once(app, 'if(!A||!R)return NaN;const ee=Oa(A,I,L)',
+        'if(!A||!R||P&&this.orog&&c==null&&!this.dem)return NaN;const ee=Oa(A,I,L)')
+    app = replace_once(app, 'if(!R||!j||!P)return NaN;const c=A??cl(this.dem,I,L)',
+        'if(!R||!j||!P||A==null&&!this.dem)return NaN;const c=A??cl(this.dem,I,L)')
+    app = replace_once(app, 'if(this.mode==="now"){if(!this.nowTemp||!this.nowMatches(I))return"";',
+        'if(this.mode==="now"){if(!this.nowTemp||I.elev==null&&!this.dem||!this.nowMatches(I))return"";')
+    app = replace_once(app, '"正在加载当地气候…")));try{await this.ready}',
+        '"正在加载当地气候…")));if(!this.dem){'
+        'j.querySelector(".desc")?.replaceChildren("海拔数据到齐后显示当地气候统计。");return}'
+        'try{await this.ready}')
+    app = replace_once(app, ':00 UTC · 已按当地地形修正`',
+        ':00 UTC · ${this.dem?"已按当地地形修正":"等待海拔数据"}`')
+    return app
 
 
 def build(output, backup_revision=None):
@@ -471,13 +580,6 @@ def build(output, backup_revision=None):
                           'const waTerrain=createAtlasTerrain();async function Lg(lon,lat){return waTerrain.elevation(lon,lat)}')
     app = replace_once(app, 'Yc.addProtocol("landdem",async N=>({data:await fv(N.url)}));',
                        'Yc.addProtocol("landdem",request=>waTerrain.image(request.url));')
-    app = replace_once(app, 'new pv(qt,A=>Ba.setLocalDem(A)),',
-                       'waTerrain.setBase(La),qt.setLayoutProperty("hillshade","visibility","visible"),'
-                       'waTerrain.follow(qt,A=>Ba.setLocalDem(A)),')
-    app = replace_once(app, 'Vc("正在加载地形…");const[N,I]',
-                       'Vc("正在加载地形…");void waLoadWater(qt,Lh);'
-                       'waBasemap.start(qt,handler=>Yc.addProtocol("atlasvector",handler),'
-                       'async path=>JSON.parse(new TextDecoder().decode(await waReadPacked(Lh,path))));const[N,I]')
     app = replace_once(app, 'function mx(N){', 'function mx(N){waBasemap.setWeatherMode(qt,N);')
     app = replace_once(app, 'I.data,1,this.tex.ldem', 'I.data,2,this.tex.ldem')
     app = replace_once(app, 'vec2 t = (v_merc - u_ldemExt.xy) / (u_ldemExt.zw - u_ldemExt.xy);',
@@ -493,6 +595,7 @@ def build(output, backup_revision=None):
     basemap = write_hashed(entry.parent, "atlas-basemap", "js", (lite / "atlas-basemap.js").read_bytes())
     app = patch_forecast(app, entry.parent, transport)
     app = patch_data(app, entry.parent, data_files, backup_revision)
+    app = patch_map_startup(app)
     css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
     lite_js = replace_once((lite / "atlas-lite.js").read_text(), "__LITE_STYLES__", css_name)
     lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())

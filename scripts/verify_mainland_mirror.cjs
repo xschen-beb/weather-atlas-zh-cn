@@ -67,6 +67,61 @@ async function denyStartupAssets(page, origin) {
   });
 }
 
+async function verifyIndependentMapLayers(instance, origin) {
+  const page = await startPage(instance,origin,{width:1000,height:700});
+  await denyStartupAssets(page,origin);
+  const requests = [
+    ['data/dem.bin','海拔'],
+    ['data/cities.json','城市列表'],
+    ['data/coastline.json','海岸线'],
+    ['data/china-map.geojson','中国地图边界'],
+  ];
+  const restored = new Set();
+  for (const [relative] of requests) {
+    await page.route(origin+mount+relative,route=>restored.has(relative)
+      ? route.fallback() : route.fulfill({status:503,body:'temporarily unavailable'}));
+  }
+  const retry = name=>page.locator('#atlas-layer-status').getByRole('button',{name:`重试${name}`,exact:true});
+  try {
+    await page.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
+    await page.getByRole('tab',{name:'按年统计',exact:true}).waitFor({timeout:20000});
+    for (const [,name] of requests) await retry(name).waitFor({timeout:20000});
+    await waitDefaultClimate(page);
+    assert.equal(await page.evaluate(()=>window.__wa.field.ready),false,'No colours based on a placeholder elevation');
+    await page.evaluate(()=>window.__wa.map.fire('click',{lngLat:{lng:116.4,lat:39.9}}));
+    await page.locator('#card').getByText('海拔数据到齐后显示当地气候统计。',{exact:true}).waitFor();
+
+    restored.add('data/dem.bin');
+    await retry('海拔').click();
+    await page.waitForFunction(()=>{
+      const {climate,field,map}=window.__wa;
+      return climate.dem?.q.length===6480000&&field.ready&&map.getLayoutProperty('hillshade','visibility')==='visible';
+    },undefined,{timeout:30000});
+    await page.locator('#card table').waitFor({timeout:30000});
+    assert(await retry('城市列表').isVisible(),'Terrain and point climate recover independently of the city list');
+    const restoredClimate = await page.evaluate(async()=>{
+      const {data}=window.__wa.climate.result;
+      return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),v=>v.toString(16).padStart(2,'0')).join('');
+    });
+
+    restored.add('data/cities.json');
+    await retry('城市列表').click();
+    await page.locator('#search').fill('北京');
+    await page.locator('#searchResults li').filter({hasText:'北京'}).first().waitFor();
+    await page.waitForFunction(()=>window.__wa.climate.cities.length===4598);
+    for (const [relative,name] of requests.slice(2)) {
+      restored.add(relative);
+      await retry(name).click();
+    }
+    await page.locator('#atlas-layer-status').waitFor({state:'hidden'});
+    await zoomTo(page,[115,22],3);
+    await mapFeatures(page,['china-maritime-dashes','china-outline']);
+    return {allFourFailedWithoutBlockingClimate:true,terrainAndCardRestoredIndependently:true,restoredClimate};
+  } finally {
+    await page.context().close();
+  }
+}
+
 async function zoomTo(page, center, zoom) {
   await page.evaluate(({center,zoom})=>window.__wa.map.jumpTo({center,zoom}),{center,zoom});
 }
@@ -361,6 +416,20 @@ async function verifyDataRoutes() {
     };
     assert.deepEqual(new Uint8Array(await reader.bytes('./',path)),contents);
     assert.deepEqual(verified,['weather.example.test','gcore.jsdelivr.net','fastly.jsdelivr.net']);
+
+    const bounded=createAtlasDataReader({[path]:[...files[path],45]},backups);
+    let deadline;
+    globalThis.fetch=async (url,init)=>new Response(new ReadableStream({start(controller){
+      controller.enqueue(contents.subarray(0,2));
+      init.signal.addEventListener('abort',()=>{
+        deadline=init.signal.reason;
+        controller.error(deadline);
+      },{once:true});
+    }}));
+    await assert.rejects(bounded.bytes('./',path),/Request timeout/);
+    assert.match(deadline?.message||'',/Request timeout/,'A layer deadline aborts the active download');
+    globalThis.fetch=async()=>new Response(contents);
+    assert.deepEqual(new Uint8Array(await bounded.bytes('./',path)),contents,'A failed layer can start a fresh download');
   } finally {
     globalThis.fetch=fetchActual;
     if(locationActual)Object.defineProperty(globalThis,'location',locationActual);
@@ -391,6 +460,7 @@ async function verifyDataRoutes() {
       sha256:Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('')};
   });
   assert.equal(sunAttempts,2,'Default climate must recover from a reset on the site');
+  await page.waitForFunction(()=>window.__wa?.field?.hasDem,undefined,{timeout:30000});
   assert.equal(demAttempts,2,'The basemap must recover from a transient download failure');
   await page.evaluate(()=>window.__wa.map.fitBounds([[72,1],[138,55]],{animate:false,padding:{left:360,right:24,top:65,bottom:35}}));
   await page.waitForFunction(()=>window.__wa.map.queryRenderedFeatures({layers:['china-maritime-dashes']}).length>0,undefined,{timeout:30000});
@@ -415,6 +485,8 @@ async function verifyDataRoutes() {
   const waterCoverage=await verifyWaterCoverage(page);
   const terrainRender=await verifyTerrain(page,origin,browser);
   const basemapRender=await verifyBasemap(page,origin,browser);
+  const mapLayers=await verifyIndependentMapLayers(browser,origin);
+  assert.equal(mapLayers.restoredClimate,startupClimate.sha256,'Layer errors and retries must preserve climate values');
 
   const fallbackPage = await startPage(browser,origin,{width:1440,height:960});
   const index=await fs.readFile(path.join(root,'index.html'),'utf8');
@@ -500,8 +572,8 @@ async function verifyDataRoutes() {
   assert.match(await lite.locator('.now .big').innerText(),/^23/);
   await lite.context().close();
 
-  // Reproduce a click before the local elevation file has loaded. Hold the
-  // global index requests until we have verified the independent point card.
+  // Hold the elevation download and global index requests while switching
+  // mode and opening a point weather card.
   const live=await startPage(browser,origin,{width:1440,height:960});
   await denyStartupAssets(live,origin);
   let releaseTerrain, releaseGrid, sawTerrain;
@@ -519,17 +591,17 @@ async function verifyDataRoutes() {
     route.fulfill({status:200,headers:{'Access-Control-Allow-Origin':'*'},json:pointFixture()}));
   try {
     await live.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
-    await Promise.race([terrainRequested,live.getByText('正在加载地形…',{exact:true}).waitFor({timeout:20000})]);
+    await terrainRequested;
     await live.getByRole('tab',{name:'实时天气（联网）',exact:true}).click();
-    await live.getByText('正在准备地图…',{exact:true}).waitFor();
-    releaseTerrain();
     await live.getByText('正在加载全球图层…',{exact:false}).first().waitFor();
     await live.locator('#search').fill('北京');
     await live.locator('#searchResults li').first().click();
     await live.locator('#card').getByText(/数据时刻：/).waitFor();
     assert.match(await live.locator('#card .now .big').innerText(),/^23/);
+    assert.equal(await live.evaluate(()=>Boolean(window.__wa.field.hasDem)),false,'Point weather must work while terrain is held');
     assert(gridRequests>0);
     assert.equal(await live.getByRole('button',{name:'重试全球图层',exact:true}).count(),0);
+    releaseTerrain();
     releaseGrid();
     const gridRetry=live.getByRole('button',{name:'重试全球图层',exact:true});
     await gridRetry.waitFor({timeout:15000});
@@ -548,7 +620,7 @@ async function verifyDataRoutes() {
   assert.deepEqual(startupAssetRequests,[],'Full and lightweight historical mode must boot without any HTTP JS or CSS asset');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
-    waterCoverage,terrain:terrainRender,basemap:basemapRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
+    waterCoverage,terrain:terrainRender,basemap:basemapRender,mapLayers,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
       compatibility_entry:true,climate:startupClimate},
     resilience:{cold_start_site_retry:true,verified_backup:true,early_fallback:true,slow_stream_kept:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
