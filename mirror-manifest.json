@@ -11,9 +11,9 @@
       "sha256": "827b0b6ae18d8e2cb22de498a8ab3b15423bd2d37d25a35a34636b79b942271e"
     },
     {
-      "path": "assets/atlas-data-2a256355db27.js",
-      "bytes": 2773,
-      "sha256": "2a256355db2718591c02718d224953903152269e825f8a434c4f387710797689"
+      "path": "assets/atlas-data-f659dc650701.js",
+      "bytes": 5903,
+      "sha256": "f659dc6507013868a6c291d28d1fc2149787eb76c81f9c444ec641b851415d34"
     },
     {
       "path": "assets/atlas-forecast-64b93394e583.js",
@@ -51,9 +51,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-3e9deec5c7c4.js",
-      "bytes": 1180669,
-      "sha256": "3e9deec5c7c48bde7ead0e97b87a57ae2e455e3c8da47a60a3e5d7a4a966e7cf"
+      "path": "assets/index-zh-CN-local-7b87ada4e4c8.js",
+      "bytes": 1181055,
+      "sha256": "7b87ada4e4c872854c2726dc4e3cabdace0df33b7a7cd1c486a7f0356b6b41a3"
     },
     {
       "path": "assets/live.worker-local-6b463d148b8e.js",
@@ -167,8 +167,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 560931,
-      "sha256": "3466b9ba2372fe0861d8bd524232a3b65277364b5171222372f0c12d669d909f"
+      "bytes": 570991,
+      "sha256": "dc2048ffbd099233d1c555a9c10c314f60fcbfdee11daf1b154cb6f63fe53f84"
     }
   ]
 }
