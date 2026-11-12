@@ -2,7 +2,9 @@
 
 用 `python3 scripts/build_mainland_mirror.py mainland-dist` 导出发布目录。构建会核验原始运行文件；地图边界、南海线段、城市表及 11 个历史气候变量按原始数据发布。导出目录使用相对路径，可放在域名根目录或站点子目录。
 
-历史气候模式随包提供海岸线、基础海拔、地名和全部数据，无需访问外部地图瓦片、字体或地理编码服务。底图显示海岸线和已有的中国边界，不包含街道级瓦片。实时预报仅在选择联网功能时请求原预报服务。
+历史气候模式随包提供地形阴影、海岸线、水域、地名和全部气候数据。默认筛选和基础地形无需访问外部地图瓦片、字体或地理编码服务。放大时，地图按需从 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) 加载更细的海拔，更新地形阴影和气候着色；两条入口都失败时，仍用站内海拔绘制。精细海拔修正只改变显示和地点估计，气候数据的时间范围和空间采样不变。
+
+水域遮罩取自 Natural Earth 的 [海洋](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-ocean/) 和 [湖泊](https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-lakes/) 数据，只包含水域几何。要重建遮罩，将两个源压缩包保存为 `ne_10m_ocean.zip` 和 `ne_10m_lakes.zip`，用 `python3 scripts/build_water_mask.py <源数据目录> localization/maps/water-mask.json.gz` 生成。底图保留原有中国边界，不包含街道级瓦片。实时预报仅在选择联网功能时请求预报服务。
 
 发布首页包含压缩的地图程序、样式、轻量版界面及历史气候计算程序。收到首页后，历史模式无需另行下载 JavaScript 或 CSS 文件即可启动；底图和气候数据仍按需读取。首页无法解压时，可加载本站保留的兼容入口。历史模式不会预先启动实时预报的计算程序。
 

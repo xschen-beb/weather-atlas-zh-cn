@@ -104,6 +104,7 @@ def inline_app(app, assets, lite_name, lite_css):
     # asset directory for the optional live worker and climate data URL scope.
     imports = [
         ("atlas-data-*.js", "createAtlasDataReader", "{createAtlasDataReader}", ["createAtlasDataReader"]),
+        ("atlas-terrain-*.js", "createAtlasTerrain", "{createAtlasTerrain}", ["createAtlasTerrain"]),
         ("atlas-forecast-*.js", "fetchPointForecast as Rv, readGfsIndex",
          "{fetchPointForecast:Rv,readGfsIndex}", ["fetchPointForecast", "readGfsIndex"]),
     ]

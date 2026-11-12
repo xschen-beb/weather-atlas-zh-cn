@@ -16,15 +16,21 @@ DIST = ROOT / "dist"
 
 LOCAL_STYLE = r'''
 function waLocalMapStyle(style) {
-  // Keep layer anchors and the original China geometry. Historical maps need
-  // only the bundled coastline, cities, elevation and climate files.
+  // Keep the local administrative geometry, and source only physical data
+  // for the terrain and water overlays.
   delete style.glyphs;
-  delete style.sources.dem;
   style.sources.omt={type:"geojson",data:{type:"FeatureCollection",features:[]}};
+  style.sources.dem.attribution+=' · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">地形数据署名</a>';
+  style.sources["water-mask"]={type:"geojson",data:{type:"FeatureCollection",features:[]},maxzoom:12,tolerance:.25};
   // These sources are filled by the same resilient reader as the climate data.
   for(const id of ["coast","china-map"]) style.sources[id].data={type:"FeatureCollection",features:[]};
   style.layers=style.layers.map(layer=>{
-    if(layer.id==="hillshade") return {id:"hillshade",type:"background",paint:{"background-opacity":0}};
+    if(layer.id==="hillshade") layer.layout={visibility:"none"};
+    if(layer.id==="water") {
+      layer.source="water-mask";
+      delete layer.filter;
+      delete layer["source-layer"];
+    }
     if(layer.source==="omt") delete layer["source-layer"];
     if(layer.id==="coastline-ne") delete layer.maxzoom;
     return layer;
@@ -49,11 +55,29 @@ function waDataFailure(error) {
   const hit=/^Atlas data ([^:]+): ([\s\S]*)$/.exec(text);
   return hit?`${waDataNames[hit[1]]??"气候数据"}（${waZhError(hit[2])}）`:waZhError(text);
 }
-async function waReadDem(base) {
-  const bytes=new Uint8Array(await waDataBytes(base,"data/dem.bin"));
+async function waReadPacked(base,path) {
+  const bytes=new Uint8Array(await waDataBytes(base,path));
   if(bytes[0]!==31||bytes[1]!==139) return bytes;
   const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function waLoadWater(map,base) {
+  try {
+    const bytes=await waReadPacked(base,"data/water-mask.json.gz");
+    const polygons=JSON.parse(new TextDecoder().decode(bytes));
+    const features=polygons.map(polygon=>({type:"Feature",properties:{},geometry:{type:"Polygon",
+      coordinates:polygon.map(deltas=>{
+        let x=0,y=0;
+        const ring=[];
+        for(let i=0;i<deltas.length;i+=2) ring.push([(x+=deltas[i])/10000,(y+=deltas[i+1])/10000]);
+        return ring;
+      }),
+    }}));
+    map.getSource("water-mask")?.setData({type:"FeatureCollection",features});
+    // The generalized line is useful as an immediate outline. At larger scales
+    // the more accurate water polygon supplies the visible shoreline instead.
+    map.setLayerZoomRange("coastline-ne",0,5);
+  } catch { /* Keep the bundled outline if the optional mask is unavailable. */ }
 }
 function waClimateWorker(workerUrl) {
   const worker=new Worker(workerUrl,{type:"module"});
@@ -373,7 +397,7 @@ def patch_data(app, assets, files, backup_revision):
     table = {x["path"]: [x["bytes"], x["sha256"]] for x in files if x["path"].startswith("data/")}
     backup = f"https://cdn.jsdelivr.net/gh/xschen-beb/weather-atlas-zh-cn@{backup_revision}/" if backup_revision else None
     app = replace_between(app, "function waClimateWorker(workerUrl)", "const waZhMapLocale=", STATIC_DATA_GLUE)
-    app = replace_once(app, 'const I=await mv(`${N}data/dem.bin`);', 'const I=await waReadDem(N);')
+    app = replace_once(app, 'const I=await mv(`${N}data/dem.bin`);', 'const I=await waReadPacked(N,"data/dem.bin");')
     app = replace_once(app, '(await(await fetch(`${N}data/cities.json`)).json()).rows',
                        '(await waDataJson(N,"data/cities.json")).rows')
     app = replace_once(app, 'const[N,I]=await Promise.all([gv(Lh),_v(Lh)]);',
@@ -424,27 +448,45 @@ def build(output, backup_revision=None):
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
 
+    mask = ROOT / "localization/maps/water-mask.json.gz"
+    mask_data = mask.read_bytes()
+    mask_path = f"data/{mask.name}"
+    (output / mask_path).write_bytes(mask_data)
+    data_files = [*manifest["files"], {"path": mask_path, "bytes": len(mask_data),
+                                        "sha256": hashlib.sha256(mask_data).hexdigest()}]
+
     entry, = (output / "assets").glob("index-zh-CN-*.js")
     app = entry.read_text()
     app = replace_once(app, 'style:nv(new URL(`${Lh}data/coastline.json`,location.href).href)',
                        'style:waLocalMapStyle(nv(new URL(`${Lh}data/coastline.json`,location.href).href))')
-    app = replace_once(app, 'new pv(qt,A=>Ba.setLocalDem(A)),', '')
-    app = replace_between(app, 'async function Lg(', 'class pv{', 'async function Lg(){return null}')
+    app = replace_between(app, 'const hv="https://elevation-tiles-prod', 'async function mv(',
+                          'const waTerrain=createAtlasTerrain();async function Lg(lon,lat){return waTerrain.elevation(lon,lat)}')
+    app = replace_once(app, 'Yc.addProtocol("landdem",async N=>({data:await fv(N.url)}));',
+                       'Yc.addProtocol("landdem",request=>waTerrain.image(request.url));')
+    app = replace_once(app, 'new pv(qt,A=>Ba.setLocalDem(A)),',
+                       'waTerrain.setBase(La),qt.setLayoutProperty("hillshade","visibility","visible"),'
+                       'waTerrain.follow(qt,A=>Ba.setLocalDem(A)),')
+    app = replace_once(app, 'Vc("正在加载地形…");const[N,I]',
+                       'Vc("正在加载地形…");void waLoadWater(qt,Lh);const[N,I]')
+    app = replace_once(app, 'I.data,1,this.tex.ldem', 'I.data,2,this.tex.ldem')
+    app = replace_once(app, 'vec2 t = (v_merc - u_ldemExt.xy) / (u_ldemExt.zw - u_ldemExt.xy);',
+                       'vec2 local = v_merc;\n  local.x += floor((u_ldemExt.x + u_ldemExt.z) * 0.5 - local.x + 0.5);\n'
+                       '  vec2 t = (local - u_ldemExt.xy) / (u_ldemExt.zw - u_ldemExt.xy);')
+    app = replace_between(app, '  float l = texture(u_ldem, t).r;', '\n}',
+                          '  vec2 detail = texture(u_ldem, t).rg;\n  return detail.x + g * (1.0 - detail.y);')
     app = replace_between(app, 'async function Bg(', 'const ka=120,',
         'async function Bg(N,I,L){const P=yv(L,N,I,35);return P?{name:Math.abs(P.lon-N)+Math.abs(P.lat-I)<1e-5?P.name:`${P.name}附近`,detail:P.country}:null}')
-    app = replace_between(app, 'function mx(N){', 'async function Rp(N){',
-        'function mx(N){if(qt.getLayer("water"))qt.setPaintProperty("water","fill-opacity",N==="live"?.18:.995)}')
-
     lite = ROOT / "localization"
     transport = write_hashed(entry.parent, "atlas-forecast", "js", (lite / "atlas-forecast.js").read_bytes())
+    terrain = write_hashed(entry.parent, "atlas-terrain", "js", (lite / "atlas-terrain.js").read_bytes())
     app = patch_forecast(app, entry.parent, transport)
-    app = patch_data(app, entry.parent, manifest["files"], backup_revision)
+    app = patch_data(app, entry.parent, data_files, backup_revision)
     css_name = write_hashed(entry.parent, "atlas-lite", "css", (lite / "atlas-lite.css").read_bytes())
     lite_js = replace_once((lite / "atlas-lite.js").read_text(), "__LITE_STYLES__", css_name)
     lite_name = write_hashed(entry.parent, "atlas-lite", "js", lite_js.encode())
     boot = 'const Lh="./",Hc='
     app = replace_once(app, boot, "function waStartRichMap(){\n" + boot) + "\n}\n"
-    app = LOCAL_STYLE + app + replace_once(START_MAP, "__LITE_MODULE__", lite_name)
+    app = f'import {{createAtlasTerrain}} from "./{terrain}";\n' + LOCAL_STYLE + app + replace_once(START_MAP, "__LITE_MODULE__", lite_name)
     local_name = write_hashed(entry.parent, "index-zh-CN-local", "js", app.encode())
     html = (output / "index.html").read_text()
     html = replace_once(html, entry.name, local_name)

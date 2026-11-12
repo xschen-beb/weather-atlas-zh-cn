@@ -15,6 +15,7 @@ const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charse
 const blocked = [];
 const errors = [];
 const startupAssetRequests = [];
+const terrainUrl = /^https:\/\/elevation-tiles-prod\.s3(?:\.us-east-1)?\.amazonaws\.com\/terrarium\//;
 let browser;
 let liteBrowser;
 const server = http.createServer(async (req, res) => {
@@ -35,6 +36,7 @@ async function startPage(instance, origin, viewport) {
   await context.route('**/*',route=>{
     const url = route.request().url();
     if (url.startsWith(origin+mount)) return route.continue();
+    if (terrainUrl.test(url)) return route.abort();
     blocked.push(url); return route.abort();
   });
   const page = await context.newPage();
@@ -56,6 +58,94 @@ async function denyStartupAssets(page, origin) {
     startupAssetRequests.push(route.request().url());
     return route.abort('connectionreset');
   });
+}
+
+async function zoomTo(page, center, zoom) {
+  await page.evaluate(({center,zoom})=>window.__wa.map.jumpTo({center,zoom}),{center,zoom});
+}
+
+async function mapFrame(page, patch, lonLat) {
+  const clip = await page.evaluate(async ({patch,lonLat})=>{
+    const {map,field}=window.__wa;
+    if(patch.hillshade) map.setLayoutProperty('hillshade','visibility',patch.hillshade);
+    if(patch.opacity!==undefined) field.opacity=patch.opacity;
+    if(patch.coarse) field.setLocalDem(null);
+    await new Promise(resolve=>{ map.once('render',resolve); map.triggerRepaint(); });
+    const point=map.project(lonLat);
+    return {x:Math.round(point.x)-12,y:Math.round(point.y)-12,width:24,height:24};
+  },{patch,lonLat});
+  const png=(await page.screenshot({clip})).toString('base64');
+  return page.evaluate(async png=>{
+    const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(png), c=>c.charCodeAt(0))]));
+    const ctx=new OffscreenCanvas(bitmap.width,bitmap.height).getContext('2d');
+    ctx.drawImage(bitmap,0,0);
+    return Array.from(ctx.getImageData(0,0,bitmap.width,bitmap.height).data);
+  },png);
+}
+
+function pixelDifference(a,b) {
+  return a.reduce((sum,x,i)=>sum+Math.abs(x-b[i]),0)/a.length;
+}
+
+async function verifyTerrain(page, origin, instance) {
+  const mountains=[102.1,29.6], sea=[114.33,22.26], land=[114.16,22.45];
+  await zoomTo(page,mountains,9);
+  await page.waitForFunction(()=>window.__wa.map.isSourceLoaded('dem')&&window.__wa.map.areTilesLoaded(),undefined,{timeout:30000});
+  const shaded=await mapFrame(page,{opacity:0,hillshade:'visible'},mountains);
+  const flat=await mapFrame(page,{opacity:0,hillshade:'none'},mountains);
+  const reliefDelta=pixelDifference(shaded,flat);
+  assert(reliefDelta>1,'Blocked external terrain must still leave visible local relief');
+  await mapFrame(page,{opacity:1,hillshade:'visible'},mountains);
+  await zoomTo(page,[114.24,22.38],10);
+  await page.waitForFunction(p=>{
+    const m=window.__wa.map;
+    return m.queryRenderedFeatures(m.project(p),{layers:['water']}).length>0;
+  },sea,{timeout:30000});
+  const seaDelta=pixelDifference(await mapFrame(page,{opacity:0},sea),await mapFrame(page,{opacity:1},sea));
+  const landDelta=pixelDifference(await mapFrame(page,{opacity:0},land),await mapFrame(page,{opacity:1},land));
+  assert(seaDelta<3&&landDelta>10,`High zoom climate colours must cover land and spare ocean: ${seaDelta}, ${landDelta}`);
+
+  const detail=await startPage(instance,origin,{width:1440,height:960});
+  await denyStartupAssets(detail,origin);
+  const png=await page.evaluate(async()=>{
+    const image=new ImageData(256,256);
+    for(let y=0;y<256;y++)for(let x=0;x<256;x++){
+      const value=32768+400+Math.floor(14*x+3*y), i=(y*256+x)*4;
+      image.data.set([value>>8,value&255,0,255],i);
+    }
+    const canvas=new OffscreenCanvas(256,256);
+    canvas.getContext('2d').putImageData(image,0,0);
+    const bytes=new Uint8Array(await (await canvas.convertToBlob()).arrayBuffer());
+    return btoa(Array.from(bytes, b=>String.fromCharCode(b)).join(''));
+  });
+  // Isolate texture/colour rendering from browser network interception timing.
+  await detail.addInitScript(png=>{
+    const nativeFetch=globalThis.fetch.bind(globalThis);
+    const bytes=Uint8Array.from(atob(png),c=>c.charCodeAt(0));
+    const counts=window.terrainFixture={primary:0,alternate:0};
+    globalThis.fetch=(input,init)=>{
+      const url=String(input);
+      if(!/^https:\/\/elevation-tiles-prod\.s3(?:\.us-east-1)?\.amazonaws\.com\/terrarium\//.test(url)) return nativeFetch(input,init);
+      const fallback=url.includes('.s3.us-east-1.');
+      if(fallback) counts.alternate++; else counts.primary++;
+      return Promise.resolve(new Response(fallback?bytes:'unavailable',{
+        status:fallback?200:503,headers:{'content-type':fallback?'image/png':'text/plain'},
+      }));
+    };
+  },png);
+  await detail.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
+  await waitDefaultClimate(detail);
+  assert.deepEqual(await detail.evaluate(()=>window.terrainFixture),{primary:0,alternate:0},'Default climate must not fetch external terrain');
+  await detail.evaluate(()=>window.__wa.map.setLayoutProperty('hillshade','visibility','none'));
+  await zoomTo(detail,mountains,9);
+  await detail.waitForFunction(()=>window.__wa.field.ldemExt[2]>window.__wa.field.ldemExt[0],undefined,{timeout:30000});
+  const corrected=await mapFrame(detail,{},mountains);
+  const coarse=await mapFrame(detail,{coarse:true},mountains);
+  const correctionDelta=pixelDifference(corrected,coarse);
+  const {primary,alternate}=await detail.evaluate(()=>window.terrainFixture);
+  assert(primary>0&&alternate>0&&correctionDelta>1,'Detail fallback must change the actual climate pixels');
+  await detail.context().close();
+  return {reliefDelta,seaDelta,landDelta,correctionDelta,alternate};
 }
 
 function pointFixture() {
@@ -136,6 +226,8 @@ async function verifyRangeFallback() {
   assert(!(await page.locator('#card').innerText()).includes('数据加载失败'));
   await fs.mkdir('mainland-evidence',{recursive:true});
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
+  await page.locator('#card').getByRole('button',{name:'关闭',exact:true}).click();
+  const terrainRender=await verifyTerrain(page,origin,browser);
 
   const fallbackPage = await startPage(browser,origin,{width:1440,height:960});
   const index=await fs.readFile(path.join(root,'index.html'),'utf8');
@@ -266,7 +358,7 @@ async function verifyRangeFallback() {
   assert.deepEqual(startupAssetRequests,[],'Full and lightweight historical mode must boot without any HTTP JS or CSS asset');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
-    startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
+    terrain:terrainRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
       compatibility_entry:true,climate:startupClimate},
     resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
