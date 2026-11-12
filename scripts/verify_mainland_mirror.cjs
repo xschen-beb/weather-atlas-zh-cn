@@ -9,7 +9,9 @@ const root = path.resolve(process.argv[2] || 'mainland-dist');
 const mount = '/weather-atlas-zh-cn/';
 const revision = process.env.ATLAS_BACKUP_REVISION || '';
 assert.match(revision,/^[a-f0-9]{40}$/,'Tests require the same pinned backup as the build');
-const backup = `https://cdn.jsdelivr.net/gh/xschen-beb/weather-atlas-zh-cn@${revision}/`;
+const backups = ['gcore.jsdelivr.net','fastly.jsdelivr.net','cdn.jsdelivr.net']
+  .map(host=>`https://${host}/gh/xschen-beb/weather-atlas-zh-cn@${revision}/`);
+const [backup] = backups;
 const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8',
   '.css':'text/css; charset=utf-8','.json':'application/json','.geojson':'application/geo+json'};
 const blocked = [];
@@ -20,6 +22,7 @@ const basemapUrl = /^https:\/\/tiles\.openfreemap\.org\/planet(?:\/|$)/;
 let basemapAttempts = 0;
 let browser;
 let liteBrowser;
+const takeScreenshot = (page, options) => process.env.ATLAS_SCREENSHOTS === '1' ? page.screenshot(options) : undefined;
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -38,6 +41,7 @@ async function startPage(instance, origin, viewport) {
   await context.route('**/*',route=>{
     const url = route.request().url();
     if (url.startsWith(origin+mount)) return route.continue();
+    if (backups.some(base=>url.startsWith(base))) return route.abort('connectionreset');
     if (terrainUrl.test(url)) return route.abort();
     if (basemapUrl.test(url)) { basemapAttempts++; return route.abort(); }
     blocked.push(url); return route.abort();
@@ -131,33 +135,41 @@ async function verifyBasemap(page, origin, instance) {
   },ids);
   assert(rendered.allowed.every(id=>['transportation','waterway','water'].includes(id)));
   assert(rendered.roadClasses.every(kind=>['motorway','trunk','primary'].includes(kind)));
-  await online.screenshot({path:'mainland-evidence/basemap.jpg',type:'jpeg',quality:82});
+  await takeScreenshot(online,{path:'mainland-evidence/basemap.jpg',type:'jpeg',quality:82});
   await online.context().close();
   return {localFallback:true,blockedMetadataDidNotGateClimate:true,rendered};
 }
 
 async function mapFrame(page, patch, lonLat, radius=12) {
-  const clip = await page.evaluate(async ({patch,lonLat,radius})=>{
+  return page.evaluate(({patch,lonLat,radius})=>{
     const {map,field}=window.__wa;
     if(patch.hillshade) map.setLayoutProperty('hillshade','visibility',patch.hillshade);
     if(patch.water) map.setLayoutProperty('water','visibility',patch.water);
     if(patch.opacity!==undefined) field.opacity=patch.opacity;
     if(patch.coarse) field.setLocalDem(null);
-    await new Promise(resolve=>{
-      const timer=setTimeout(resolve,1000);
-      map.once('render',()=>{ clearTimeout(timer); resolve(); });
+    // Read the composited map while its frame is still available. Taking a
+    // full browser screenshot for each comparison is slow on software WebGL.
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('No map frame rendered')),5000);
+      map.once('render',()=>{
+        clearTimeout(timer);
+        try {
+          const canvas=map.getCanvas(), gl=canvas.getContext('webgl2');
+          const point=map.project(lonLat), side=radius*2;
+          const x=Math.round(point.x*gl.drawingBufferWidth/canvas.clientWidth)-radius;
+          const y=gl.drawingBufferHeight-Math.round(point.y*gl.drawingBufferHeight/canvas.clientHeight)-radius;
+          if(x<0||y<0||x+side>gl.drawingBufferWidth||y+side>gl.drawingBufferHeight) throw new Error('Map pixel sample is outside the viewport');
+          const pixels=new Uint8Array(side*side*4);
+          const previous=gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+          gl.readPixels(x,y,side,side,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER,previous);
+          resolve(Array.from(pixels));
+        } catch(error) { reject(error); }
+      });
       map.triggerRepaint();
     });
-    const point=map.project(lonLat);
-    return {x:Math.round(point.x)-radius,y:Math.round(point.y)-radius,width:radius*2,height:radius*2};
   },{patch,lonLat,radius});
-  const png=(await page.screenshot({clip})).toString('base64');
-  return page.evaluate(async png=>{
-    const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(png), c=>c.charCodeAt(0))]));
-    const ctx=new OffscreenCanvas(bitmap.width,bitmap.height).getContext('2d');
-    ctx.drawImage(bitmap,0,0);
-    return Array.from(ctx.getImageData(0,0,bitmap.width,bitmap.height).data);
-  },png);
 }
 
 function pixelDifference(a,b) {
@@ -304,8 +316,61 @@ async function verifyRangeFallback() {
   }
 }
 
+async function verifyDataRoutes() {
+  const {createAtlasDataReader}=await import('../localization/atlas-data.js');
+  const fetchActual=globalThis.fetch;
+  const locationActual=Object.getOwnPropertyDescriptor(globalThis,'location');
+  const path='data/check.bin', contents=Uint8Array.of(10,20,30,40);
+  const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',contents)),b=>b.toString(16).padStart(2,'0')).join('');
+  const files={[path]:[contents.length,sha,'high']};
+  Object.defineProperty(globalThis,'location',{value:{href:'https://weather.example.test/map/'},configurable:true});
+  try {
+    let stopped;
+    const routes=[];
+    globalThis.fetch=(url,init)=>{
+      routes.push([url.hostname,init.credentials]);
+      if(url.hostname!=='weather.example.test')return Promise.resolve(new Response(contents));
+      return new Promise((_,reject)=>init.signal.addEventListener('abort',()=>{
+        stopped=init.signal.reason;
+        reject(stopped);
+      },{once:true}));
+    };
+    const reader=createAtlasDataReader(files,backups);
+    const [a,b]=await Promise.all([reader.bytes('./',path),reader.bytes('./',path)]);
+    assert.deepEqual(new Uint8Array(a),contents);
+    assert.notEqual(a,b,'One consumer can transfer its copy without detaching another');
+    assert.deepEqual(routes,[['weather.example.test','same-origin'],['gcore.jsdelivr.net','omit']]);
+    assert.match(stopped?.message||'',/Another data route succeeded/,'An early backup must win before the stalled primary times out');
+
+    const called=[];
+    globalThis.fetch=async (url)=>{
+      called.push(url.hostname);
+      return new Response(new ReadableStream({start(controller){
+        controller.enqueue(contents.subarray(0,2));
+        setTimeout(()=>{ controller.enqueue(contents.subarray(2)); controller.close(); },2050);
+      }}));
+    };
+    assert.deepEqual(new Uint8Array(await reader.bytes('./',path)),contents);
+    assert.deepEqual(called,['weather.example.test'],'A slow but progressing download should not start a duplicate');
+
+    const verified=[];
+    globalThis.fetch=async (url)=>{
+      verified.push(url.hostname);
+      if(url.hostname==='weather.example.test')return new Response('',{status:503});
+      return new Response(url.hostname==='gcore.jsdelivr.net'?Uint8Array.of(10,20,30,41):contents);
+    };
+    assert.deepEqual(new Uint8Array(await reader.bytes('./',path)),contents);
+    assert.deepEqual(verified,['weather.example.test','gcore.jsdelivr.net','fastly.jsdelivr.net']);
+  } finally {
+    globalThis.fetch=fetchActual;
+    if(locationActual)Object.defineProperty(globalThis,'location',locationActual);
+    else delete globalThis.location;
+  }
+}
+
 (async () => {
   await verifyRangeFallback();
+  await verifyDataRoutes();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const executablePath = process.env.ATLAS_TEST_CHROMIUM;
@@ -345,7 +410,7 @@ async function verifyRangeFallback() {
   await page.waitForFunction(()=>document.querySelector('#card table')&&document.querySelector('#card').innerText.includes('中国'),undefined,{timeout:40000});
   assert(!(await page.locator('#card').innerText()).includes('数据加载失败'));
   await fs.mkdir('mainland-evidence',{recursive:true});
-  await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
+  await takeScreenshot(page,{path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
   await page.locator('#card').getByRole('button',{name:'关闭',exact:true}).click();
   const waterCoverage=await verifyWaterCoverage(page);
   const terrainRender=await verifyTerrain(page,origin,browser);
@@ -378,7 +443,7 @@ async function verifyRangeFallback() {
   assert.equal(await fallbackPage.evaluate(()=>Boolean(window.__wa.climate.result)),false,'Reject a wrong checksum');
   await fallbackPage.locator('#status').getByRole('button',{name:'重试',exact:true}).click();
   await waitDefaultClimate(fallbackPage);
-  assert.equal(failedSite,4);
+  assert.equal(failedSite,3);
   assert.equal(backupAttempts,2);
   await fallbackPage.locator('#status').waitFor({state:'hidden'});
   assert.equal(externalEntryLoads,1,'A decoder failure should use the same-origin compatibility entry once');
@@ -418,7 +483,7 @@ async function verifyRangeFallback() {
   await lite.getByRole('rowheader',{name:'日照（小时）',exact:true}).waitFor();
   await lite.getByRole('rowheader',{name:'紫外线峰值',exact:true}).waitFor();
   await lite.getByText(/基于 ERA5 2001—2025 年/).waitFor();
-  await lite.screenshot({path:'mainland-evidence/lite.jpg',type:'jpeg',quality:82,fullPage:true});
+  await takeScreenshot(lite,{path:'mainland-evidence/lite.jpg',type:'jpeg',quality:82,fullPage:true});
 
   let liteForecastAttempts=0;
   await lite.route('https://api.open-meteo.com/v1/forecast?**', async route => {
@@ -438,6 +503,7 @@ async function verifyRangeFallback() {
   // Reproduce a click before the local elevation file has loaded. Hold the
   // global index requests until we have verified the independent point card.
   const live=await startPage(browser,origin,{width:1440,height:960});
+  await denyStartupAssets(live,origin);
   let releaseTerrain, releaseGrid, sawTerrain;
   const terrain=new Promise(resolve=>{releaseTerrain=resolve;});
   const grid=new Promise(resolve=>{releaseGrid=resolve;});
@@ -484,7 +550,7 @@ async function verifyRangeFallback() {
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
     waterCoverage,terrain:terrainRender,basemap:basemapRender,startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
       compatibility_entry:true,climate:startupClimate},
-    resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
+    resilience:{cold_start_site_retry:true,verified_backup:true,early_fallback:true,slow_stream_kept:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
   await fs.writeFile('mainland-evidence/report.json',JSON.stringify(report,null,2)+'\n');
   console.log('MAINLAND_MIRROR_REPORT '+JSON.stringify(report));

@@ -70,11 +70,14 @@ BOOT = r'''
 '''
 
 EMBEDDED_WORKER = r'''
-function waEmbeddedClimateWorker() {
-  const url=URL.createObjectURL(new Blob([waEmbeddedClimateSource],{type:"text/javascript"}));
+function waEmbeddedWorker(source) {
+  const fileMode=location.protocol==="file:";
+  const url=URL.createObjectURL(new Blob([fileMode?'"use strict";\n':"",source],{type:"text/javascript"}));
   const release=()=>URL.revokeObjectURL(url);
   try {
-    const worker=new Worker(url,{type:"module"});
+    // The inlined sources have no imports. A classic worker also runs from
+    // local HTML, where some browsers reject module workers at an opaque origin.
+    const worker=new Worker(url,fileMode?undefined:{type:"module"});
     worker.addEventListener("message",release,{once:true});
     worker.addEventListener("error",release,{once:true});
     return worker;
@@ -101,7 +104,7 @@ def scope_module(source, exports):
 
 def inline_app(app, assets, lite_name, lite_css):
     # The executable bytes come from the HTML's origin. Keep the original
-    # asset directory for the optional live worker and climate data URL scope.
+    # asset directory as the base for the climate data URL scope.
     imports = [
         ("atlas-data-*.js", "createAtlasDataReader", "{createAtlasDataReader}", ["createAtlasDataReader"]),
         ("atlas-terrain-*.js", "createAtlasTerrain", "{createAtlasTerrain}", ["createAtlasTerrain"]),
@@ -133,9 +136,19 @@ def inline_app(app, assets, lite_name, lite_css):
     worker = replace_once(adapter.read_text(), f'await import("./{science.name}");',
                           "{\n" + science.read_text() + "\n}")
     app = replace_once(app, 'const worker=new Worker(workerUrl,{type:"module"});',
-                       "const worker=waEmbeddedClimateWorker();")
+                       "const worker=waEmbeddedWorker(waEmbeddedClimateSource);")
 
-    if app.count("import.meta.url") != 4:
+    live, = assets.glob("live.worker-local-*.js")
+    forecast, = assets.glob("atlas-forecast-*.js")
+    names = ["readGfsIndex", "readGfsRange", "readForecastIndex", "readForecastRange", "readForecastResponse"]
+    specifier = "{" + ",".join(names) + "}"
+    live_worker = replace_once(live.read_text(), f'import {specifier} from "./{forecast.name}";',
+                               f"const {specifier}={scope_module(forecast.read_text(), names)};")
+    app = replace_once(app,
+        f'new Worker(new URL(""+new URL("{live.name}",import.meta.url).href,import.meta.url),{{type:"module"}})',
+        "waEmbeddedWorker(waEmbeddedLiveSource)")
+
+    if app.count("import.meta.url") != 2:
         raise ValueError("Recheck relative module asset URLs")
     app = app.replace("import.meta.url", "waAssetBase")
     if re.search(r"^import\s", app, flags=re.M):
@@ -144,6 +157,7 @@ def inline_app(app, assets, lite_name, lite_css):
         'const waAssetBase=new URL("./assets/",location.href).href;\n'
         f"const {{startLite:waEmbeddedStartLite}}={lite};\n"
         f"const waEmbeddedClimateSource={json.dumps(worker, ensure_ascii=False)};\n"
+        f"const waEmbeddedLiveSource={json.dumps(live_worker, ensure_ascii=False)};\n"
         + EMBEDDED_WORKER + app
     )
 

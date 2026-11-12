@@ -95,7 +95,7 @@ function waClimateWorker(workerUrl) {
     const reply={type:"wa-climate-bytes",fetchId:request.fetchId};
     try {
       const url=new URL(request.url);
-      if(url.origin!==location.origin||!url.href.startsWith(directory.href)||url.search||url.hash) {
+      if(url.origin!==new URL(location.href).origin||!url.href.startsWith(directory.href)||url.search||url.hash) {
         throw new Error("Unsupported climate data URL");
       }
       const name=url.pathname.slice(directory.pathname.length);
@@ -399,8 +399,11 @@ def patch_forecast(app, assets, transport):
 
 def patch_data(app, assets, files, backup_revision):
     module = write_hashed(assets, "atlas-data", "js", (ROOT / "localization" / "atlas-data.js").read_bytes())
-    table = {x["path"]: [x["bytes"], x["sha256"]] for x in files if x["path"].startswith("data/")}
-    backup = f"https://cdn.jsdelivr.net/gh/xschen-beb/weather-atlas-zh-cn@{backup_revision}/" if backup_revision else None
+    table = {x["path"]: [x["bytes"], x["sha256"],
+                         "low" if re.fullmatch(r"data/(?:basemap-(?:admin|physical)|water-mask-v\d+)\.json\.gz", x["path"]) else "high"]
+             for x in files if x["path"].startswith("data/")}
+    backups = [f"https://{host}/gh/xschen-beb/weather-atlas-zh-cn@{backup_revision}/"
+               for host in ("gcore.jsdelivr.net", "fastly.jsdelivr.net", "cdn.jsdelivr.net")] if backup_revision else []
     app = replace_between(app, "function waClimateWorker(workerUrl)", "const waZhMapLocale=", STATIC_DATA_GLUE)
     app = replace_once(app, 'const I=await mv(`${N}data/dem.bin`);', 'const I=await waReadPacked(N,"data/dem.bin");')
     app = replace_once(app, '(await(await fetch(`${N}data/cities.json`)).json()).rows',
@@ -428,7 +431,7 @@ def patch_data(app, assets, files, backup_revision):
         '`地点数据加载失败：${waDataFailure(Ee)}`),be("button",{class:"chip",onclick:()=>this.showCard(I,L,!1,R)},"重试地点数据"))')
     config = (
         f'import {{createAtlasDataReader}} from "./{module}";\n'
-        f'const {{bytes:waDataBytes,json:waDataJson}}=createAtlasDataReader({json.dumps(table)},{json.dumps(backup)});\n'
+        f'const {{bytes:waDataBytes,json:waDataJson}}=createAtlasDataReader({json.dumps(table)},{json.dumps(backups)});\n'
     )
     return config + app
 

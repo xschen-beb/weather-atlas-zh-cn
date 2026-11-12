@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ATLAS_BACKUP_REVISION: 2d0bb2086a686e4dee4149be427d9d7fbef8ba5b
+      ATLAS_BACKUP_REVISION: df85fc877f4f29b9715eba58d553f29ca861c28d
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

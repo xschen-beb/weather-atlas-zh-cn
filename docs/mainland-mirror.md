@@ -10,9 +10,9 @@
 
 要重新生成站内底图，用 `python3 scripts/build_basemap.py <源数据目录>`。将 Natural Earth 的 `ne_10m_roads.zip`、`ne_10m_rivers_lake_centerlines.zip`、`ne_50m_admin_0_countries.zip`、`ne_10m_admin_0_boundary_lines_land.zip`、`ne_10m_admin_1_states_provinces_lines.zip`、`ne_10m_admin_1_states_provinces.zip` 分别保存为 `roads.zip`、`rivers_lake_centerlines.zip`、`countries.zip`、`country-lines.zip`、`state-lines.zip`、`state-areas.zip`。生成器核验源文件的 SHA-256，依赖 pyshp 2.3.1 和 Shapely 2.1.2。
 
-发布首页包含压缩的地图程序、样式、轻量版界面及历史气候计算程序。收到首页后，历史模式无需另行下载 JavaScript 或 CSS 文件即可启动；底图和气候数据仍按需读取。首页无法解压时，可加载本站保留的兼容入口。历史模式不会预先启动实时预报的计算程序。
+发布首页包含压缩的地图程序、样式、轻量版界面、历史气候和实时预报计算程序。收到首页后，两种模式无需另行下载 JavaScript 或 CSS 文件即可启动；底图和数据仍按需读取。首页无法解压时，可加载本站保留的兼容入口。历史模式不会预先启动实时预报的计算程序。
 
-静态数据请求失败时会自动重试。公开站点的构建可加 `--backup-revision <GitHub 提交 SHA>`，用该提交中相同的公开数据作备用；仅在本站两次请求都失败后才尝试备用线路。备用文件不携带站点凭证，读取前必须通过文件长度和 SHA-256 校验。更换数据版本时，应使用包含相同数据的已发布提交重新固定备用版本。未配置备用时仍会重试本站文件。
+静态数据优先从本站读取。如果首批数据迟迟没有收到，或请求失败，会尽快尝试备用线路；持续收到数据的慢请求可以继续下载。公开站点的构建可加 `--backup-revision <GitHub 提交 SHA>`，使用 jsDelivr 的 Gcore、Fastly 和默认线路上该提交的相同公开数据。每个文件最多同时进行两次尝试，成功后取消其他尝试。备用请求不携带站点凭证，只在长度和 SHA-256 都匹配时使用。更换数据版本时，应使用包含相同数据的已发布提交重新固定备用版本。未配置备用时仍会重试本站文件。
 
 浏览器无法启动完整地图时会自动打开轻量版，也可在站点网址末尾加 `?map=lite` 直接打开。轻量版提供中国和全球底图、城市搜索、点选及历史气候详情，与完整版共用同一套 ERA5 数据和计算。轻量版也能查看地点天气和未来 24 小时预报；全球预报图层在完整版中。
 
@@ -27,6 +27,8 @@
 ## 发布到其他静态托管
 
 将 `mainland-dist/` 内的文件放到托管的发布目录，保持 `assets/` 和 `data/` 的层级。主页为 `index.html`；JavaScript 需以 JavaScript 类型提供，`.bin` 文件按原始字节提供。使用 HTTPS，并且不要将资源请求重定向到登录页。
+
+也可以运行 `python3 scripts/build_standalone_atlas.py mainland-dist weather-atlas-offline.html`，生成可下载的完整地图备用文件。在现代浏览器中打开本地 HTML，即可使用随文件提供的地图与历史数据，无需访问 GitHub Pages。实时天气和更细的地图瓦片仍取决于相应的数据服务。
 
 `mirror-manifest.json` 包含发布文件的 SHA256，可比对线上返回内容。浏览器核验在项目子路径挂载页面，阻断外部脚本和样式文件，检查完整版的默认筛选和轻量版的城市详情，并验证解压失败时的兼容入口。启用正式网址后仍要从中国大陆线路检查真实首页和资源；开发测试不能替代这一步。
 
