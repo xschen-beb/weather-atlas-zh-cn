@@ -41,9 +41,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-572c8b31e796.js",
-      "bytes": 1180861,
-      "sha256": "572c8b31e7963da68fa52c836902899e3f449754288d7a4781d8d7842c8e055a"
+      "path": "assets/index-zh-CN-local-50559d8a34ed.js",
+      "bytes": 1180884,
+      "sha256": "50559d8a34edcef2f5c9dc8b07e40d88793649b568596bfebac15d011a614565"
     },
     {
       "path": "assets/live.worker-local-6b463d148b8e.js",
@@ -142,8 +142,8 @@
     },
     {
       "path": "index.html",
-      "bytes": 2567,
-      "sha256": "f9668945e5d2db56d62fc8a6354713aa0f4177188a2d74fea18aedf808ead665"
+      "bytes": 554015,
+      "sha256": "eea6910f23c6657c3416d95e17cac8cc2c313bd3d44279bd961e3004a078ebe9"
     }
   ]
 }
