@@ -51,9 +51,9 @@
       "sha256": "1ce9ff0abb6a4b6cc4b0ba54d0dd7d0a0f0305025c5e3cfc3752411390cdf260"
     },
     {
-      "path": "assets/index-zh-CN-local-2abab6d80c17.js",
-      "bytes": 1180540,
-      "sha256": "2abab6d80c1702d8642d24b38febb868bb180274c5ea920bdeb6307bac1b6bc9"
+      "path": "assets/index-zh-CN-local-3e9deec5c7c4.js",
+      "bytes": 1180669,
+      "sha256": "3e9deec5c7c48bde7ead0e97b87a57ae2e455e3c8da47a60a3e5d7a4a966e7cf"
     },
     {
       "path": "assets/live.worker-local-6b463d148b8e.js",
@@ -161,14 +161,14 @@
       "sha256": "8d1ca4fd7de497f1a65837ee45c711bd758945b641991e718894052264135285"
     },
     {
-      "path": "data/water-mask.json.gz",
-      "bytes": 1469053,
-      "sha256": "e4c179d7ae174f55ea477bf96ccb54125e202be31977b72b084b07008a7915dc"
+      "path": "data/water-mask-v2.json.gz",
+      "bytes": 1484908,
+      "sha256": "8ad6e4a3d8f78d101f57eb888f1e1ed1542b5b0ac7998ef7a9be68bf6eb5d9d8"
     },
     {
       "path": "index.html",
-      "bytes": 560831,
-      "sha256": "d1f80f3bab6c6fa702f380eb25a488057326a4e5b86258717738ffad158e847d"
+      "bytes": 560931,
+      "sha256": "3466b9ba2372fe0861d8bd524232a3b65277364b5171222372f0c12d669d909f"
     }
   ]
 }
