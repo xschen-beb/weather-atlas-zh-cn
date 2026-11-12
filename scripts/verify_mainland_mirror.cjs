@@ -14,6 +14,7 @@ const types = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charse
   '.css':'text/css; charset=utf-8','.json':'application/json','.geojson':'application/geo+json'};
 const blocked = [];
 const errors = [];
+const startupAssetRequests = [];
 let browser;
 let liteBrowser;
 const server = http.createServer(async (req, res) => {
@@ -47,6 +48,14 @@ async function waitDefaultClimate(page) {
     const r=climate?.result;
     return r?.mode==='days'&&r.scaleMax===365&&r.data.some((value,i)=>i%2===0&&value>0)&&!climate.inflight;
   },undefined,{timeout:90000});
+}
+
+async function denyStartupAssets(page, origin) {
+  const prefix=origin+mount+'assets/';
+  await page.route(url=>url.href.startsWith(prefix)&&/\.(js|css)$/.test(url.pathname),route=>{
+    startupAssetRequests.push(route.request().url());
+    return route.abort('connectionreset');
+  });
 }
 
 function pointFixture() {
@@ -92,6 +101,7 @@ async function verifyRangeFallback() {
   const executablePath = process.env.ATLAS_TEST_CHROMIUM;
   browser = await chromium.launch({headless:true,executablePath,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
   const page = await startPage(browser, origin, {width:1440,height:960});
+  await denyStartupAssets(page,origin);
   let sunAttempts=0, demAttempts=0;
   await page.route(origin+mount+'data/climate/sun.bin',route=>
     ++sunAttempts===1?route.abort('connectionreset'):route.fallback());
@@ -99,6 +109,12 @@ async function verifyRangeFallback() {
     ++demAttempts===1?route.fulfill({status:503,body:'temporarily unavailable'}):route.fallback());
   await page.goto(origin+mount,{waitUntil:'domcontentloaded',timeout:30000});
   await waitDefaultClimate(page);
+  const startupClimate = await page.evaluate(async ()=>{
+    const r=window.__wa.climate.result;
+    const hash=await crypto.subtle.digest('SHA-256',r.data);
+    return {scale:r.scaleMax,samples:r.data.length,
+      sha256:Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('')};
+  });
   assert.equal(sunAttempts,2,'Default climate must recover from a reset on the site');
   assert.equal(demAttempts,2,'The basemap must recover from a transient download failure');
   await page.evaluate(()=>window.__wa.map.fitBounds([[72,1],[138,55]],{animate:false,padding:{left:360,right:24,top:65,bottom:35}}));
@@ -122,6 +138,14 @@ async function verifyRangeFallback() {
   await page.screenshot({path:'mainland-evidence/mirror.jpg',type:'jpeg',quality:82});
 
   const fallbackPage = await startPage(browser,origin,{width:1440,height:960});
+  const index=await fs.readFile(path.join(root,'index.html'),'utf8');
+  const unpackFailure=index.replace(/data-bytes="\d+" data-sha256=/,'data-bytes="0" data-sha256=');
+  assert.notEqual(index,unpackFailure,'The test must break the embedded decoder check');
+  let externalEntryLoads=0;
+  fallbackPage.on('request',request=>{
+    if (request.url().startsWith(origin+mount+'assets/index-zh-CN-local-')) externalEntryLoads++;
+  });
+  await fallbackPage.route(origin+mount,route=>route.fulfill({status:200,contentType:'text/html; charset=utf-8',body:unpackFailure}));
   const sun=await fs.readFile(path.join(root,'data/climate/sun.bin'));
   const corrupt=Buffer.from(sun);
   corrupt[0]^=1;
@@ -143,9 +167,11 @@ async function verifyRangeFallback() {
   assert.equal(failedSite,4);
   assert.equal(backupAttempts,2);
   await fallbackPage.locator('#status').waitFor({state:'hidden'});
+  assert.equal(externalEntryLoads,1,'A decoder failure should use the same-origin compatibility entry once');
 
   liteBrowser = await chromium.launch({headless:true,executablePath,args:['--disable-webgl']});
   const lite = await startPage(liteBrowser, origin, {width:390,height:844});
+  await denyStartupAssets(lite,origin);
   let cellsAttempts=0;
   await lite.route('**/data/climate/cells.bin', async route => {
     if (++cellsAttempts!==1) return route.fallback();
@@ -237,8 +263,11 @@ async function verifyRangeFallback() {
 
   assert.deepEqual(errors,[]);
   assert.deepEqual(blocked,[],'Only mocked weather services may be contacted in live mode');
+  assert.deepEqual(startupAssetRequests,[],'Full and lightweight historical mode must boot without any HTTP JS or CSS asset');
   const report={passed:true,subpath:mount,third_party_requests:blocked.length,details,
     lite:{webgl:false,viewport:'390×844',place:'香港',months,recovered_from_http:503},
+    startup:{webgl_and_lite_assets_denied:true,http_js_css_requests:startupAssetRequests.length,
+      compatibility_entry:true,climate:startupClimate},
     resilience:{cold_start_site_retry:true,verified_backup:true,wrong_checksum_rejected:true,manual_retry:true,lite_base_survives_supplement:true},
     live:{early_mode_click:true,point_with_grid_pending:true,global_retry:true,lite_point_retry:true,strict_range:true}};
   await fs.writeFile('mainland-evidence/report.json',JSON.stringify(report,null,2)+'\n');

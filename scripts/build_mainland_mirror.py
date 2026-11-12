@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import shutil
 
+from embed_atlas_startup import embed_startup
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
@@ -316,6 +318,12 @@ def patch_forecast(app, assets, transport):
     app = replace_once(app, worker.name, worker_name)
     worker.unlink()
 
+    # Merely opening historical mode should not start a forecast worker.
+    app = replace_once(app, "pool=new Bv(2);", "pool=null;")
+    if app.count("this.pool.request(") != 2:
+        raise ValueError("Recheck live worker pool initialization")
+    app = app.replace("this.pool.request(", "(this.pool??=new Bv(2)).request(")
+
     app = replace_between(app, 'async function mg(', 'const zv=', CYCLE_LOOKUP)
     app = replace_between(app, 'async function Rv(', 'function Og(', '')
     app = replace_once(app, 'this.pending.set(j,ae=>ae.error?ee(new Error(ae.error)):c(ae)),P.postMessage({id:j,cycle:I,fh:L,v:A,hrrr:R})',
@@ -441,6 +449,7 @@ def build(output, backup_revision=None):
     html = (output / "index.html").read_text()
     html = replace_once(html, entry.name, local_name)
     html = replace_once(html, '>实时天气</button>', '>实时天气（联网）</button>')
+    html = embed_startup(html, app, entry.parent, local_name, lite_name, css_name)
     (output / "index.html").write_text(html)
     entry.unlink()
     (output / ".nojekyll").touch()
