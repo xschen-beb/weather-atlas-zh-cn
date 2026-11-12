@@ -80,8 +80,18 @@ export function createAtlasDataReader(files, backupBases = []) {
 
     return new Promise((resolve,reject)=>{
       const active = new Set();
-      let next = 0, finished = false, hedge, primaryError, lastError;
+      let next = 0, finished = false, hedge, deadline, primaryError, lastError;
       const delay = entry[2] === 'low' ? HEDGE_DELAY * 2 : HEDGE_DELAY;
+
+      function finish(error, body) {
+        if (finished) return;
+        finished = true;
+        clearTimeout(hedge);
+        clearTimeout(deadline);
+        for (const attempt of active) attempt.controller.abort(error ?? new Error('Another data route succeeded'));
+        if (error) reject(new Error(`Atlas data ${relative}: ${error.message || 'Network request failed'}`,{cause:error}));
+        else resolve(body);
+      }
 
       function schedule() {
         clearTimeout(hedge);
@@ -104,26 +114,21 @@ export function createAtlasDataReader(files, backupBases = []) {
           if (!attempt.receiving) { attempt.receiving = true; schedule(); }
         }).then(body=>{
           active.delete(attempt);
-          if (finished) return;
-          finished = true;
-          clearTimeout(hedge);
-          for (const other of active) other.controller.abort(new Error('Another data route succeeded'));
-          resolve(body);
+          finish(null,body);
         },error=>{
           active.delete(attempt);
           if (finished) return;
           if (route.primary) primaryError = error;
           lastError = error;
           if (!active.size && next < routes.length) start();
-          else if (!active.size) {
-            finished = true;
-            clearTimeout(hedge);
-            const cause = primaryError || lastError;
-            reject(new Error(`Atlas data ${relative}: ${cause?.message || 'Network request failed'}`,{cause}));
-          } else schedule();
+          else if (!active.size) finish(primaryError || lastError || new Error('Network request failed'));
+          else schedule();
         });
       }
 
+      // Map layers can retry without restarting the page. Bound the whole
+      // round, including all routes, so successive slow routes cannot pile up.
+      if (entry[3]) deadline = setTimeout(()=>finish(new Error('Request timeout')),entry[3]);
       start();
     });
   }
